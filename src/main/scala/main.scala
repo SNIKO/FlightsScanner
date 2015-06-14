@@ -1,9 +1,10 @@
-import scala.concurrent.Future
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.util.{Try, Failure, Success}
-import java.io.PrintWriter
+import dispatch._, dispatch.Defaults._
+import com.github.nscala_time.time.DurationBuilder
 import com.github.nscala_time.time.Imports._
+import org.joda.time.{DateTime, Period, LocalDate}
 import org.joda.time.format.ISODateTimeFormat
+import java.io.PrintWriter
+import scala.concurrent.Future
 
 object Extensions {
   implicit class RichLocalDate(date: LocalDate) {
@@ -19,11 +20,20 @@ object Extensions {
   }
 }
 
+object after {
+  import java.util.{Timer, TimerTask}
+
+  def apply[T](duration: DurationBuilder)(action: => T): Unit = timer.schedule(asTimerTask(action), duration.millis)
+
+  private val timer = new Timer
+  private def asTimerTask(action: => Unit) = new TimerTask { override def run() = action }
+}
+
 object main extends App {
-
   import Extensions._
-
   type Trip = Seq[OneTwoTrip.Flight]
+
+  def log(msg: String) = println(s"${LocalDateTime.now.toString(DateTimeFormat.shortDateTime())} $msg")
 
   def getFilePath(date: DateTime, flights: Seq[OneTwoTrip.Flight]): String = {
     val route = flights.map(f => f.date.toString("ddMM") + f.from + f.to).mkString
@@ -32,30 +42,28 @@ object main extends App {
     AppConfig.baseFolder + fileName
   }
 
-  def saveToFile(filePath: String, content: Array[Char]): Future[String] = Future {
+  def saveToFile(filePath: String, content: String): Future[String] = Future {
     val writer = new PrintWriter(filePath)
     writer.write(content)
     writer.close()
-
     filePath
   }
 
-  def loadTrip(trip: Trip): Future[String] = {
-    println(s"Loading $trip...")
+  def loadTrip(trip: Trip): Future[Either[Throwable, String]] = {
+    import scala.concurrent.duration._
+    val filePath = getFilePath(DateTime.now, trip)
+
+    log(s" Loading '$trip'...")
     for {
-      content <- OneTwoTrip.Api.search(trip)
-      filePath = getFilePath(DateTime.now, trip)
+      content <- retry.Backoff(100, Duration(10, SECONDS), 2)(() => OneTwoTrip.Api.search(trip)).right
       filePath <- saveToFile(filePath, content)
-    } yield filePath
+    } yield Right(filePath)
   }
 
-  case class TripLoadException(trip: Trip, ex: Throwable) extends Throwable
-  def loadTripWithRecover(trip: Trip): Future[Try[String]] = loadTrip(trip).map(Success(_)) recover { case ex: Exception => Failure(TripLoadException(trip, ex)) }
-
-  def loadTrips(trips: Seq[Trip], maxConcurrentLoads: Int): Future[Seq[Try[String]]] = {
+  def loadTrips(trips: Seq[Trip], maxConcurrentLoads: Int): Future[Seq[Either[Throwable, String]]] = {
     val split = SplitAt(maxConcurrentLoads)
     trips match {
-      case split(chunk, Nil) => Future.sequence(chunk.map(loadTripWithRecover))
+      case split(chunk, Nil) => Future.sequence(chunk.map(loadTrip))
       case split(chunk, remaining) => for {
         c <- loadTrips(chunk, maxConcurrentLoads)
         r <- loadTrips(remaining, maxConcurrentLoads)
@@ -63,22 +71,28 @@ object main extends App {
     }
   }
 
-  val flightCombinations = for {
-    trip <- AppConfig.tripConfigs
-    date <- trip.minDate to trip.maxDate withStep 1.day
+  val tripCombinations = for {
+    trip     <- AppConfig.tripConfigs
+    date     <- trip.minDate to trip.maxDate withStep 1.day
     duration <- trip.minDuration to trip.maxDuration
-    flight = new OneTwoTrip.Flight(trip.fromAirport, trip.toAirport, date)
-    returnFlight = new OneTwoTrip.Flight(trip.toAirport, trip.fromAirport, date.plusDays(duration))
+    flight        = new OneTwoTrip.Flight(trip.fromAirport, trip.toAirport, date)
+    returnFlight  = new OneTwoTrip.Flight(trip.toAirport, trip.fromAirport, date.plusDays(duration))
   } yield Seq(flight, returnFlight)
 
-  println(s"${flightCombinations.length} flight combinations found")
+  def check: Unit = {
+    log(s"Loading ${tripCombinations.length} trip combinations...")
 
-  loadTrips(flightCombinations, 3) onSuccess {
-    case res => {
-      val failed = res.filter(_.isFailure)
-      println(s"The search has been completed. ${failed.length} requests failed:")
-      failed foreach { case Failure(TripLoadException(trip, ex)) => println(trip + ": " + ex) }
-  }}
+    loadTrips(tripCombinations, 3) onSuccess {
+      case results => {
+        log(s"${results.count(_.isRight)} out of ${tripCombinations.length} trips have been successfully loaded")
+        log(s"The next check is scheduled on ${LocalDateTime.now.plusHours(24).toString(DateTimeFormat.shortDateTime())}")
+
+        after(24.hours)(check)
+      }
+    }
+  }
+
+  check
 
   scala.io.StdIn.readLine()
 }
