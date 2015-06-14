@@ -48,11 +48,13 @@ object main extends App {
   }
 
   val tripCombinations = for {
-    trip     <- AppConfig.tripConfigs
-    date     <- trip.minDate to trip.maxDate withStep 1.day
-    duration <- trip.minDuration to trip.maxDuration
-    flight        = new OneTwoTrip.Flight(trip.fromAirport, trip.toAirport, date)
-    returnFlight  = new OneTwoTrip.Flight(trip.toAirport, trip.fromAirport, date.plusDays(duration))
+    trip        <- AppConfig.tripConfigs
+    origin      <- trip.fromAirports
+    destination <- trip.toAirports
+    date        <- trip.minDate to trip.maxDate withStep 1.day
+    duration    <- trip.minDuration to trip.maxDuration
+    flight        = new OneTwoTrip.Flight(origin, destination, date)
+    returnFlight  = new OneTwoTrip.Flight(destination, origin, date.plusDays(duration))
   } yield Seq(flight, returnFlight)
 
   def check: Unit = {
