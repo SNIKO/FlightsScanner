@@ -28,7 +28,7 @@ object main extends App {
   def loadTrip(trip: Trip): Future[Either[Throwable, String]] = {
     import scala.concurrent.duration._
 
-    Log(s" Loading '$trip'...")
+    Log(s"Loading '$trip'...")
     for {
       content <- retry.Backoff(100, Duration(10, SECONDS), 2)(() => OneTwoTrip.Api.search(trip)).right
       filePath <- saveToFile(getFilePath(trip), content)

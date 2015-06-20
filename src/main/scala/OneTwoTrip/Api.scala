@@ -12,10 +12,12 @@ class Flight(val from: String, val to: String, val date: LocalDate) {
 
 object Api {
 
-  def search(trip: Seq[Flight]): Future[Either[Throwable, String]] = {
-    val u = url(getSearchUrl(trip))
+  private[this] val ResponseTimeout = 5.minutes
 
-    Http(u).either.map {
+  def search(trip: Seq[Flight]): Future[Either[Throwable, String]] = {
+    val request = url(getSearchUrl(trip))
+
+    http(request).either.map {
       case Left(error) => {
         logError(trip, error.getMessage)
         Left(error)
@@ -31,6 +33,8 @@ object Api {
       }
     }
   }
+
+  private[this] val http = Http.configure(_.setRequestTimeoutInMs(ResponseTimeout.millis.toInt))
 
   private[this] object Errors {
     val requestLimitReached = "{\"error\":\"REQUEST_LIMIT_REACHED\"}"
