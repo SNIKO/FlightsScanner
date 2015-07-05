@@ -15,6 +15,8 @@ class Direction(val fromAirport: String, val toAirport: String, val date: LocalD
   override def toString = fromAirport + "->" + toAirport + " " + date.toString("dd MMM")
 }
 
+class LimitReachedException extends Exception
+
 object Api {
   type Route = Seq[Direction]
 
@@ -25,22 +27,18 @@ object Api {
     val request = url(getSearchUrl(trip))
 
     http(request).either.map {
-      case Left(error) =>
-        logError(trip, error.getMessage)
-        Left(error)
+      case Left(error) => Left(error)
       case Right(response) => response.getResponseBody match {
-        case Errors.requestLimitReached =>
-          logError(trip, "Request limit reached")
-          Left(new Exception("Request limit reached"))
+        case Errors.requestLimitReached => Left(new LimitReachedException)
         case content => JsonProtocol.parse(content) match {
-          case Success(trips) => {
-            val filePath = getFilePath(trip)
+          case Success(trips) =>
+            val filePath = AppConfig.baseFolder + getFileName(trip) + ".json"
             Utils.saveToFile(filePath, content)
             Right(trips)
-          }
           case Failure(ex) =>
-            logError(trip, s"Failed to parse response")
-            Left(ex)
+            val filePath = AppConfig.baseFolder + "Errors\\" + getFileName(trip) + ".txt"
+            Utils.saveToFile(filePath, ex.getMessage)
+            Right(Seq.empty[Fare])
         }
       }
     }
@@ -57,12 +55,10 @@ object Api {
     s"https://secure.onetwotrip.com/_api/searching/startSync/?route=$r&ad=1&cs=E"
   }
 
-  private def getFilePath(flights: Route): String = {
+  private def getFileName(flights: Route): String = {
     val route = flights.map(f => f.date.toString("ddMM") + f.fromAirport + f.toAirport).mkString
     val timestamp = DateTime.now.toString(ISODateTimeFormat.basicDateTimeNoMillis)
-    val fileName = s"$timestamp $route.json"
-    AppConfig.baseFolder + fileName
-  }
 
-  private def logError(route: Route, error: String) = Log(s"An error occurred when loading '$route': $error")
+    timestamp + " " + route
+  }
 }

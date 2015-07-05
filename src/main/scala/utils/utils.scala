@@ -8,7 +8,7 @@ import com.github.nscala_time.time.Imports._
 import org.joda.time.{LocalDate, Period}
 
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
+import scala.concurrent.{Future, Promise}
 
 object Utils {
 
@@ -18,17 +18,24 @@ object Utils {
     writer.close()
     filePath
   }
-
 }
 
 object After {
-  def apply[T](duration: DurationBuilder)(action: => T): Unit = timer.schedule(asTimerTask(action), duration.millis)
+  def apply[T](duration: DurationBuilder)(action: => Future[T]) = {
+    val promise = Promise[T]()
+
+    timer.schedule(
+      new TimerTask {
+        override def run() = {
+          promise.completeWith(action)
+        }
+      },
+      duration.millis)
+
+    promise.future
+  }
 
   private val timer = new Timer
-
-  private def asTimerTask(action: => Unit) = new TimerTask {
-    override def run() = action
-  }
 }
 
 object Log {
