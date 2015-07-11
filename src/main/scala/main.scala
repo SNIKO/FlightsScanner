@@ -1,7 +1,7 @@
 import OneTwoTrip.Api.Route
 import OneTwoTrip.{Fare, LimitReachedException}
 import com.github.nscala_time.time.Imports._
-import config.AppConfig
+import config.{AppConfig, SearchConfig}
 import dispatch.Defaults._
 import org.joda.time.DateTime
 import org.joda.time.format.ISODateTimeFormat
@@ -13,6 +13,8 @@ import scala.util.Success
 
 object main extends App {
 
+  val MaxConcurrentLoads = 3
+
   def getFilePath(flights: Route): String = {
     val route = flights.map(f => f.date.toString("ddMM") + f.fromAirport + f.toAirport).mkString
     val timestamp = DateTime.now.toString(ISODateTimeFormat.basicDateTimeNoMillis)
@@ -23,67 +25,86 @@ object main extends App {
 
   def logError(route: Route, error: String) = Log(s"An error occurred when loading '$route': $error")
 
-  def saveFares(route: Route, fares: Seq[Fare]) = {
-    if (fares.length > 0) {
-      val file = getFilePath(route)
-      val formattedFares = fares.sortBy(_.price).map(f => f.prettyPrint).mkString("\n")
+  def saveFares(allFares: Seq[Fare]) = {
+    val faresByDirection = allFares.groupBy(f => (f.flights.head.segments.head.fromAirport, f.flights.head.segments.last.toAirport))
 
-      Utils.saveToFile(file, formattedFares)
+    faresByDirection.foreach {
+      case ((fromAirport, toAirport), fares) =>
+        val formattedFares = fares.sortBy(_.price).map(f => f.prettyPrint).mkString("\n")
+        val file = s"${AppConfig.baseFolder}formatted\\$fromAirport $toAirport ${fares.head.flights.head.segments.head.departureDate.toString("ddMM")}.txt"
+
+        Utils.saveToFile(file, formattedFares)
     }
   }
 
-  def loadRoute(route: Route): Future[Either[Throwable, Seq[Fare]]] = {
+  def loadFares(route: Route): Future[Either[Throwable, Seq[Fare]]] = {
     Log(s"Loading fares for route: '$route'...")
 
     OneTwoTrip.Api.search(route) flatMap {
       case Right(fares) =>
         Log(s"${fares.length} fares for $route have been loaded")
-        saveFares(route, fares)
         Future.fromTry(Success(Right(fares)))
       case Left(ex) => ex match {
         case e: LimitReachedException =>
           logError(route, "Requests limit reached")
-          After(90.minutes)(loadRoute(route))
+          After(90.minutes)(loadFares(route))
         case e =>
           logError(route, e.getMessage)
-          After(1.minute)(loadRoute(route))
+          After(1.minute)(loadFares(route))
       }
     }
   }
 
-  def loadRoutes(routes: Seq[Route], maxConcurrentLoads: Int): Future[Seq[Either[Throwable, Seq[Fare]]]] = {
+  def loadFaresInParallel(batch: Seq[Route]): Future[Seq[Fare]] = {
+    val routeFutures = batch.map(loadFares)
+    val batchFuture = Future.sequence(routeFutures)
+
+    batchFuture.map(_.flatMap(_.right.get))
+  }
+
+  def loadFares(routes: Seq[Route], maxConcurrentLoads: Int): Future[Seq[Fare]] = {
     val split = SplitAt(maxConcurrentLoads)
+
     routes match {
-      case split(chunk, Nil) => Future.sequence(chunk.map(loadRoute))
-      case split(chunk, remaining) => for {
-        c <- loadRoutes(chunk, maxConcurrentLoads)
-        r <- loadRoutes(remaining, maxConcurrentLoads)
-      } yield c ++ r
+      case split(batch, Nil) => loadFaresInParallel(batch)
+      case split(batch, remaining) => for {
+        b <- loadFares(batch, maxConcurrentLoads)
+        r <- loadFares(remaining, maxConcurrentLoads)
+      } yield b ++ r
     }
   }
 
-  val routeCombinations = for {
-    trip        <- AppConfig.tripConfigs
-    origin      <- trip.fromAirports
-    destination <- trip.toAirports
-    date        <- trip.minDate to trip.maxDate withStep 1.day
-    duration    <- trip.minDuration to trip.maxDuration
-    flight        = new OneTwoTrip.Direction(origin, destination, date)
-    returnFlight  = new OneTwoTrip.Direction(destination, origin, date.plusDays(duration))
-  } yield Seq(flight, returnFlight)
+  def loadFares(config: SearchConfig, maxConcurrentLoads: Int): Future[Seq[Fare]] = {
+    val routes = for {
+      origin      <- config.fromAirports
+      destination <- config.toAirports
+      date        <- config.minDate to config.maxDate withStep 1.day
+      duration    <- config.minDuration to config.maxDuration
+      flight       = new OneTwoTrip.Direction(origin, destination, date)
+      returnFlight = new OneTwoTrip.Direction(destination, origin, date.plusDays(duration))
+    } yield Seq(flight, returnFlight)
+
+    loadFares(routes, maxConcurrentLoads).andThen { case Success(allFares) => saveFares(allFares) }
+  }
 
   def check = {
-    Log(s"Loading ${routeCombinations.length} route combinations...")
-    loadRoutes(routeCombinations, 3)
+    Log(s"Loading fares for ${AppConfig.tripConfigs.length} trip configurations...")
+
+    AppConfig.tripConfigs.foldLeft(Future(Seq.empty[Fare])) {
+      (previousFutures, nextConfig) =>
+        for {
+          previousFares <- previousFutures
+          newFares <- loadFares(nextConfig, MaxConcurrentLoads)
+        } yield previousFares ++ newFares
+    }
   }
 
   check.onSuccess {
-    case results => {
-      Log(s"${results.count(_.isRight)} out of ${routeCombinations.length} routes have been successfully loaded")
+    case fares =>
+      Log(s"${fares.length} have been successfully loaded")
       Log(s"The next check is scheduled on ${LocalDateTime.now.plusHours(22).toString(DateTimeFormat.shortDateTime())}")
 
       After(22.hours)(check)
-    }
   }
 
   scala.io.StdIn.readLine()
