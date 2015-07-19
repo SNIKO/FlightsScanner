@@ -69,4 +69,8 @@ object Implicits {
       case None => formatter
     }
   }
+
+  implicit class RichStringBuilder(stringBuilder: StringBuilder) {
+    def appendLine(s: String): StringBuilder = stringBuilder.append(s).append("\n")
+  }
 }
