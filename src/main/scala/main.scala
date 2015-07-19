@@ -9,7 +9,7 @@ import utils.Implicits._
 import utils.{After, Log, SplitAt, Utils}
 
 import scala.concurrent.Future
-import scala.util.Success
+import scala.util.{Failure, Success}
 
 object main extends App {
 
@@ -47,7 +47,7 @@ object main extends App {
       case Left(ex) => ex match {
         case e: LimitReachedException =>
           logError(route, "Requests limit reached")
-          After(90.minutes)(loadFares(route))
+          After(5.minutes)(loadFares(route))
         case e =>
           logError(route, e.getMessage)
           After(1.minute)(loadFares(route))
@@ -99,12 +99,13 @@ object main extends App {
     }
   }
 
-  check.onSuccess {
-    case fares =>
+  check.onComplete {
+    case Success(fares) =>
       Log(s"${fares.length} have been successfully loaded")
       Log(s"The next check is scheduled on ${LocalDateTime.now.plusHours(22).toString(DateTimeFormat.shortDateTime())}")
 
       After(22.hours)(check)
+    case Failure(ex) => println(ex)
   }
 
   scala.io.StdIn.readLine()

@@ -5,6 +5,7 @@ import java.util.{Timer, TimerTask}
 
 import com.github.nscala_time.time.DurationBuilder
 import com.github.nscala_time.time.Imports._
+import org.joda.time.format.DateTimeFormatter
 import org.joda.time.{LocalDate, Period}
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -58,4 +59,14 @@ object Implicits {
     def withStep(period: Period) = filter(period)
   }
 
+  implicit class RichString(string: String) {
+    def toDateTimeFormatter = new DateTimeFormatter(null, DateTimeFormat.forPattern(string).getParser)
+  }
+  
+  implicit class RichDateTimeFormatter(formatter: DateTimeFormatter) {
+    def withZone(zoneId: Option[String]): DateTimeFormatter = zoneId match {
+      case Some(id) => formatter.withZone(DateTimeZone.forID(id))
+      case None => formatter
+    }
+  }
 }
