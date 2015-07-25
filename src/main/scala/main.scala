@@ -73,7 +73,7 @@ object main extends App {
   }
 
   def loadFares(routes: Seq[Route], maxConcurrentLoads: Int): Future[Seq[Fare]] = {
-    routes.sliding(maxConcurrentLoads).foldLeft(Future(Seq.empty[Fare])) {
+    routes.grouped(maxConcurrentLoads).foldLeft(Future(Seq.empty[Fare])) {
       (resultFuture, slice) => {
         for {
           resultFares <- resultFuture
@@ -88,7 +88,7 @@ object main extends App {
     loadFares(tripOptions, maxConcurrentLoads).andThen { case Success(allFares) => saveTripFares(allFares) }
   }
   
-  def loadFares = {
+  def loadFares: Future[Seq[Fare]] = {
     Log(s"Loading fares for ${AppConfig.tripConfigs.length} trip configurations...")
 
     AppConfig.tripConfigs.foldLeft(Future(Seq.empty[Fare])) {
