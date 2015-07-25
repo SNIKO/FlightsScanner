@@ -1,14 +1,16 @@
 package OneTwoTrip
 
+import java.io.IOException
+
 import com.github.nscala_time.time.Imports._
 import config.AppConfig
-import dispatch._
 import org.joda.time.DateTime
 import org.joda.time.format.ISODateTimeFormat
-import utils.{Log, Utils}
+import utils.Utils
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
+import scala.io.Source
 import scala.util.{Failure, Success}
 
 class Direction(val fromAirport: String, val toAirport: String, val date: LocalDate) {
@@ -18,33 +20,34 @@ class Direction(val fromAirport: String, val toAirport: String, val date: LocalD
 class LimitReachedException extends Exception
 
 object Api {
+
   type Route = Seq[Direction]
 
-  // Constants
-  private val ResponseTimeout = 5.minutes
+  // TODO: Rewrite it using Spray
+  def search(trip: Route): Future[Either[Throwable, Seq[Fare]]] = Future {
+    try {
+      val searchUrl = getSearchUrl(trip)
+      val content = Source.fromURL(searchUrl).mkString
 
-  def search(trip: Route): Future[Either[Throwable, Seq[Fare]]] = {
-    val request = url(getSearchUrl(trip))
-
-    http(request).either.map {
-      case Left(error) => Left(error)
-      case Right(response) => response.getResponseBody match {
-        case Errors.requestLimitReached => Left(new LimitReachedException)
-        case content => JsonProtocol.parse(content) match {
-          case Success(trips) =>
+      content match {
+        case Errors.requestLimitReached => Left(new LimitReachedException())
+        case faresAsJson => JsonProtocol.parse(faresAsJson) match {
+          case Success(fares) =>
             val filePath = AppConfig.baseFolder + getFileName(trip) + ".json"
             Utils.saveToFile(filePath, content)
-            Right(trips)
+            Right(fares)
           case Failure(ex) =>
             val filePath = AppConfig.baseFolder + "Errors\\" + getFileName(trip) + ".txt"
-            Utils.saveToFile(filePath, ex.getMessage)
-            Right(Seq.empty[Fare])
+            val msg = searchUrl + "\n\n" + ex.getMessage
+
+            Utils.saveToFile(filePath, msg)
+            Left(ex)
         }
       }
+    } catch {
+      case e: IOException => Left(e)
     }
   }
-
-  private val http = Http.configure(_.setRequestTimeoutInMs(ResponseTimeout.millis.toInt))
 
   private object Errors {
     val requestLimitReached = "{\"error\":\"REQUEST_LIMIT_REACHED\"}"

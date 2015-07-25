@@ -74,11 +74,11 @@ object main extends App {
 
   def loadFares(routes: Seq[Route], maxConcurrentLoads: Int): Future[Seq[Fare]] = {
     routes.grouped(maxConcurrentLoads).foldLeft(Future(Seq.empty[Fare])) {
-      (resultFuture, slice) => {
+      (resultFuture, group) => {
         for {
           resultFares <- resultFuture
-          sliceFares <- Future.sequence(slice.map(route => loadFares(route))).map(_.flatten)
-        } yield resultFares ++ sliceFares
+          groupFares <- Future.sequence(group.map(route => loadFares(route))).map(_.flatten)
+        } yield resultFares ++ groupFares
       }
     }
   }
