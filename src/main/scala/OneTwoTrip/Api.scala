@@ -1,11 +1,10 @@
 package OneTwoTrip
 
 import java.io.IOException
+import java.time.{OffsetDateTime, LocalDate}
+import java.time.format.DateTimeFormatter
 
-import com.github.nscala_time.time.Imports._
 import config.AppConfig
-import org.joda.time.DateTime
-import org.joda.time.format.ISODateTimeFormat
 import utils.Utils
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -14,7 +13,7 @@ import scala.io.Source
 import scala.util.{Failure, Success}
 
 class Direction(val fromAirport: String, val toAirport: String, val date: LocalDate) {
-  override def toString = fromAirport + "->" + toAirport + " " + date.toString("dd MMM")
+  override def toString = fromAirport + "->" + toAirport + " " + DateTimeFormatter.ofPattern("dd MMM").format(date)
 }
 
 class LimitReachedException extends Exception
@@ -54,13 +53,13 @@ object Api {
   }
 
   private def getSearchUrl(route: Route): String = {
-    val r = route.map(flight => s"${flight.date.toString("ddMM")}" + flight.fromAirport + flight.toAirport).mkString
+    val r = route.map(flight => s"${DateTimeFormatter.ofPattern("ddMM").format(flight.date)}" + flight.fromAirport + flight.toAirport).mkString
     s"https://secure.onetwotrip.com/_api/searching/startSync/?route=$r&ad=1&cs=E"
   }
 
   private def getFileName(flights: Route): String = {
-    val route = flights.map(f => f.date.toString("ddMM") + f.fromAirport + f.toAirport).mkString
-    val timestamp = DateTime.now.toString(ISODateTimeFormat.basicDateTimeNoMillis)
+    val route = flights.map(f => DateTimeFormatter.ofPattern("ddMM").format(f.date) + f.fromAirport + f.toAirport).mkString
+    val timestamp = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmssZ").format(OffsetDateTime.now)
 
     timestamp + " " + route
   }

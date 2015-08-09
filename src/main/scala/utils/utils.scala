@@ -1,12 +1,9 @@
 package utils
 
 import java.io.PrintWriter
+import java.time._
+import java.time.format.DateTimeFormatter
 import java.util.{Timer, TimerTask}
-
-import com.github.nscala_time.time.DurationBuilder
-import com.github.nscala_time.time.Imports._
-import org.joda.time.format.DateTimeFormatter
-import org.joda.time.{LocalDate, Period}
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.{Future, Promise}
@@ -22,7 +19,7 @@ object Utils {
 }
 
 object After {
-  def apply[T](duration: DurationBuilder)(action: => Future[T]) = {
+  def apply[T](duration: Duration)(action: => Future[T]) = {
     val promise = Promise[T]()
 
     timer.schedule(
@@ -31,7 +28,7 @@ object After {
           promise.completeWith(action)
         }
       },
-      duration.millis)
+      duration.getSeconds * 1000)
 
     promise.future
   }
@@ -40,7 +37,7 @@ object After {
 }
 
 object Log {
-  def apply(msg: String): Unit = println(s"${LocalDateTime.now.toString(DateTimeFormat.longDateTime())}: $msg")
+  def apply(msg: String): Unit = println(s"${LocalDateTime.now.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)}: $msg")
 }
 
 case class SplitAt(n: Int) {
@@ -52,20 +49,20 @@ case class SplitAt(n: Int) {
 object Implicits {
 
   implicit class RichLocalDate(date: LocalDate) {
-    def to(endDate: LocalDate): (Period) => Iterator[LocalDate] = step => Iterator.iterate(date)(_.plus(step)).takeWhile(_ <= endDate)
+    def isBeforeOrEqual(other: LocalDate) = date.isBefore(other) || date.isEqual(other)
+    
+    def to(endDate: LocalDate): Period => Iterator[LocalDate] = {
+      step => Iterator.iterate(date)(_.plus(step)).takeWhile(_.isBeforeOrEqual(endDate))
+    }
   }
 
   implicit class RichLocalDateIterator(filter: Period => Iterator[LocalDate]) {
     def withStep(period: Period) = filter(period)
   }
 
-  implicit class RichString(string: String) {
-    def toDateTimeFormatter = new DateTimeFormatter(null, DateTimeFormat.forPattern(string).getParser)
-  }
-  
   implicit class RichDateTimeFormatter(formatter: DateTimeFormatter) {
     def withZone(zoneId: Option[String]): DateTimeFormatter = zoneId match {
-      case Some(id) => formatter.withZone(DateTimeZone.forID(id))
+      case Some(id) => formatter.withZone(ZoneId.of(id))
       case None => formatter
     }
   }

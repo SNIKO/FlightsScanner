@@ -1,23 +1,26 @@
+import java.time.format.DateTimeFormatter
+import java.time.{Duration, Instant, LocalDateTime, Period}
+
 import OneTwoTrip.Api.Route
 import OneTwoTrip.{Fare, LimitReachedException}
-import com.github.nscala_time.time.Imports._
 import config.{AppConfig, TripConfig}
-import dispatch.Defaults._
-import org.joda.time.DateTime
-import org.joda.time.format.ISODateTimeFormat
 import utils.Implicits._
 import utils.{After, Log, Utils}
 
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
-import scala.util.{Failure, Success}
+import scala.util.Success
 
 object main extends App {
 
   val MaxConcurrentLoads = 3
+  val CheckInterval = Duration.ofHours(24)
+
+  val cities = flights.ReferenceData.airports.map(a => (a.iataCode, a.city)).toMap
 
   def getFilePath(flights: Route): String = {
-    val route = flights.map(f => f.date.toString("ddMM") + f.fromAirport + f.toAirport).mkString
-    val timestamp = DateTime.now.toString(ISODateTimeFormat.basicDateTimeNoMillis)
+    val route = flights.map(f => DateTimeFormatter.ofPattern("ddMM").format(f.date) + f.fromAirport + f.toAirport).mkString
+    val timestamp = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmssZ").format(LocalDateTime.now)
     val fileName = s"$timestamp $route.txt"
 
     AppConfig.baseFolder + "formatted\\" + fileName
@@ -27,8 +30,8 @@ object main extends App {
 
   def saveTripFares(allFares: Seq[Fare]) = {
     val faresByDirection = allFares.groupBy(f => {
-      val origin      = f.flights.head.segments.head.fromAirport
-      val destination = f.flights.head.segments.last.toAirport
+      val origin      = cities(f.flights.head.segments.head.fromAirport)
+      val destination = cities(f.flights.head.segments.last.toAirport)
 
       (origin, destination)
     })
@@ -37,17 +40,17 @@ object main extends App {
       case ((origin, destination), fares) =>
         val formattedFares = fares.sortBy(_.price).map(f => f.prettyPrint).mkString("\n")
         val tripDate = fares.head.flights.head.segments.head.departureDate
-        val filePath = s"${AppConfig.baseFolder}formatted\\$origin $destination ${tripDate.toString("ddMM")}.txt"
+        val filePath = s"${AppConfig.baseFolder}formatted\\$origin - $destination ${DateTimeFormatter.ofPattern("ddMM").format(tripDate)}.txt"
 
         Utils.saveToFile(filePath, formattedFares)
     }
   }
 
-  def getTripOptions(config: TripConfig): Seq[Seq[OneTwoTrip.Direction]] = {
+  def getTripOptions(config: TripConfig): Seq[Route] = {
     for {
       origin      <- config.fromAirports
       destination <- config.toAirports
-      date        <- config.minDate to config.maxDate withStep 1.day
+      date        <- config.minDate to config.maxDate withStep Period.ofDays(1)
       duration    <- config.minDuration to config.maxDuration
       flight       = new OneTwoTrip.Direction(origin, destination, date)
       returnFlight = new OneTwoTrip.Direction(destination, origin, date.plusDays(duration))
@@ -64,10 +67,10 @@ object main extends App {
       case Left(ex) => ex match {
         case e: LimitReachedException =>
           logError(route, "Requests limit reached")
-          After(5.minutes)(loadFares(route))
+          After(Duration.ofMinutes(5))(loadFares(route))
         case e =>
           logError(route, e.getMessage)
-          After(1.minute)(loadFares(route))
+          After(Duration.ofMinutes(1))(loadFares(route))
       }
     }
   }
@@ -100,14 +103,24 @@ object main extends App {
     }
   }
 
-  loadFares.onComplete {
-    case Success(fares) =>
-      Log(s"${fares.length} have been successfully loaded")
-      Log(s"The next check is scheduled on ${LocalDateTime.now.plusHours(22).toString(DateTimeFormat.shortDateTime())}")
+  def checkFares(): Unit = {
+    val startTime = Instant.now
 
-      After(22.hours)(loadFares)
-    case Failure(ex) => println(ex)
+    loadFares.onSuccess {
+      case fares =>
+        val endTime = Instant.now
+        val elapsedTime = Duration.between(startTime, endTime)
+        val timeToNextCheck = if (CheckInterval.minus(elapsedTime).isNegative) Duration.ofSeconds(1) else CheckInterval.minus(elapsedTime)
+        val nextCheckTime = LocalDateTime.now.plus(timeToNextCheck)
+
+        Log(s"${fares.length} have been successfully loaded")
+        Log(s"The next check is scheduled on ${nextCheckTime}")
+
+        After(timeToNextCheck)(Future(checkFares()))
+    }
   }
+
+  checkFares()
 
   scala.io.StdIn.readLine()
 }

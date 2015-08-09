@@ -1,8 +1,9 @@
 package OneTwoTrip
 
-import com.github.nscala_time.time.Imports._
+import java.time._
+import java.time.format.DateTimeFormatter
+
 import spray.json._
-import utils.Implicits._
 
 import scala.util.Try
 
@@ -10,7 +11,9 @@ object JsonProtocol extends DefaultJsonProtocol {
 
   private case class Rate(currencyFrom: String, currencyTo: String, factor: BigDecimal)
 
-  private case class PriceInfo(adultFare: BigDecimal, adultTaxes: BigDecimal, currency: String, markup: BigDecimal)
+  private case class PriceInfo(adultFare: BigDecimal, adultTaxes: BigDecimal, currency: String, markup: BigDecimal) {
+    val totalPrice = adultFare + adultTaxes + markup
+  }
 
   def parse(searchResponse: String): Try[Seq[Fare]] = Try {
     val json      = searchResponse.parseJson
@@ -22,9 +25,10 @@ object JsonProtocol extends DefaultJsonProtocol {
 
     val planes    = readPlanes(jPlanes)
     val rates     = readRates(jRates)
-    val segments  = readSegments(jTrips, planes)
 
-    readFares(jFares, segments, rates)
+    val trips = jTrips.map(trip => readTripTemplate(trip, planes))
+
+    jFares.map(fare => readFare(fare, trips, rates)).flatMap(f => f.right.toOption)
   }
 
   private def readPlanes(planes: JsObject): Seq[Plane] = {
@@ -35,7 +39,7 @@ object JsonProtocol extends DefaultJsonProtocol {
     p.toSeq
   }
 
-  private def readRates(rates: JsObject) = {
+  private def readRates(rates: JsObject): Seq[Rate] = {
     val r = rates.fields map {
       case (currencyPair, JsString(rate)) => currencyPair.splitAt(3) match {
         case (from, to) => Rate(from, to, rate.toDouble)
@@ -45,60 +49,77 @@ object JsonProtocol extends DefaultJsonProtocol {
     r.toSeq
   }
 
-  private def readSegments(trips: Seq[JsValue], planes: Seq[Plane]) = {
-    trips map (trip => {
-      val stDt    = fromField[String]         (trip, "stDt")
-      val stTm    = fromField[String]         (trip, "stTm")
-      val from    = fromField[String]         (trip, "from")
-      val to      = fromField[String]         (trip, "to")
-      val airCmp  = fromField[String]         (trip, "airCmp")
-      val fltNm   = fromField[String]         (trip, "fltNm")
-      val oprdBy  = fromField[Option[String]] (trip, "oprdBy")
-      val plane   = fromField[String]         (trip, "plane")
+  private def readTripTemplate(trip: JsValue, planes: Seq[Plane]): Either[String, Segment] = try {
+    val stDt    = fromField[String]         (trip, "stDt")
+    val stTm    = fromField[String]         (trip, "stTm")
+    val from    = fromField[String]         (trip, "from")
+    val to      = fromField[String]         (trip, "to")
+    val airCmp  = fromField[String]         (trip, "airCmp")
+    val fltNm   = fromField[String]         (trip, "fltNm")
+    val oprdBy  = fromField[Option[String]] (trip, "oprdBy")
+    val plane   = fromField[String]         (trip, "plane")
 
-      val formatter = "yyyyMMddHHmm".toDateTimeFormatter withZone timezones.get(from)
+    val formatter = DateTimeFormatter.ofPattern("yyyyMMddHHmm")
+    val departureLocalTime = LocalDateTime.parse(stDt + stTm, formatter)
+    val departureOffsetTime = OffsetDateTime.of(departureLocalTime, timeZoneOffsets(from))
 
-      Segment(
-        departureDate = DateTime.parse(stDt + stTm, formatter),
-        fromAirport = from,
-        toAirport = to,
-        airline = airCmp,
-        flightNumber = fltNm,
-        operatedBy = oprdBy,
-        plane = planes.find(p => p.code == plane).head.name,
-        reservationClass = "",
-        cabinClass = "")
-    })
+    val segment = Segment(
+      departureDate     = departureOffsetTime,
+      fromAirport       = from,
+      toAirport         = to,
+      airline           = airCmp,
+      flightNumber      = fltNm,
+      operatedBy        = oprdBy,
+      plane             = planes.find(p => p.code == plane).head.name,
+      reservationClass  = "",
+      cabinClass        = "")
+
+    Right(segment)
+
+  } catch {
+    case ex: Throwable => Left(ex.getMessage)
   }
 
-  private def readFares(fares: Seq[JsValue], segments: Seq[Segment], rates: Seq[Rate]) = {
-    fares map (fare => {
-      val prcInf  = fromField[JsValue](fare, "prcInf")
-      val dirs    = fromField[Vector[JsValue]](fare, "dirs")
+  private def readFare(fare: JsValue, segments: Seq[Either[String, Segment]], rates: Seq[Rate]): Either[String, Fare] = try {
+    val prcInf  = fromField[JsValue](fare, "prcInf")
+    val dirs    = fromField[Vector[JsValue]](fare, "dirs")
 
-      val flights = dirs.map(direction => readFlight(direction, segments))
+    val directions = dirs.map(dir => readDirection(dir, segments))
+    val priceInfo = readPriceInfo(prcInf)
 
-      val priceInfo = readPriceInfo(prcInf)
-      val price = priceInfo.adultFare + priceInfo.adultTaxes + priceInfo.markup
-      val usdPrice = priceInfo.currency match {
-        case "USD" => price
-        case currency => price * rates.find(r => r.currencyFrom == currency && r.currencyTo == "USD").head.factor
-      }
+    if (directions.count(_.isLeft) == 0) {
+      val usdPrice = getUSDValue(priceInfo.totalPrice, priceInfo.currency, rates)
+      Right(Fare(directions.map(_.right.get), usdPrice, OffsetDateTime.now))
+    } else {
+      Left(directions.flatMap(d => d.left.toOption).mkString("\n"))
+    }
 
-      Fare(flights, usdPrice, DateTime.now)
-    })
+  } catch {
+    case ex: Throwable => Left(ex.getMessage)
   }
 
-  private def readFlight(value: JsValue, segmentTemplates: Seq[Segment]) = {
-    val segments = fromField[Vector[JsValue]](value, "trps") map (trp => {
-      val id      = fromField[Int]    (trp, "id")
-      val cls     = fromField[String] (trp, "cls")
-      val srvCls  = fromField[String] (trp, "srvCls")
+  private def readDirection(direction: JsValue, tripTemplates: Seq[Either[String, Segment]]): Either[String, Flight] = try {
+    val trps = fromField[Vector[JsValue]](direction, "trps")
 
-      segmentTemplates(id).copy(reservationClass = cls, cabinClass = srvCls)
-    })
+    val trips = trps.map(trip => readTrip(trip, tripTemplates))
 
-    Flight(segments)
+    if (trips.count(_.isLeft) == 0)
+      Right(Flight(trips.map(_.right.get)))
+    else
+      Left(trips.flatMap(t => t.left.toOption).mkString("\n"))
+
+  } catch {
+    case ex: Throwable => Left(ex.getMessage)
+  }
+
+  private def readTrip(trip: JsValue, tripTemplates: Seq[Either[String, Segment]]): Either[String, Segment] = try {
+    val id      = fromField[Int]    (trip, "id")
+    val cls     = fromField[String] (trip, "cls")
+    val srvCls  = fromField[String] (trip, "srvCls")
+
+    tripTemplates(id).right.map(_.copy(reservationClass = cls, cabinClass = srvCls))
+  } catch {
+    case ex: Throwable => Left(ex.getMessage)
   }
 
   private def readPriceInfo(value: JsValue): PriceInfo = {
@@ -110,5 +131,13 @@ object JsonProtocol extends DefaultJsonProtocol {
     PriceInfo(adtB, adtT, cur, markupNew)
   }
 
-  val timezones = flights.ReferenceData.airports.map(a => (a.iataCode, a.timezone)).toMap
+  private def getUSDValue(value: BigDecimal, currentCurrency: String, rates: Seq[Rate]) = currentCurrency match {
+    case "USD" => value
+    case currency =>
+      val rate = rates.find(r => r.currencyFrom == currency && r.currencyTo == "USD").head
+
+      value * rate.factor
+  }
+
+  val timeZoneOffsets = flights.ReferenceData.airports.map(a => (a.iataCode, a.zoneOffset)).toMap
 }

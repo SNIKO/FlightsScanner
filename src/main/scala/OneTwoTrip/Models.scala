@@ -1,11 +1,14 @@
 package OneTwoTrip
 
-import com.github.nscala_time.time.Imports._
+import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
+
 import utils.Implicits._
 
-case class Plane(code: String, name: String)
+case class Plane(code: String,
+                 name: String)
 
-case class Segment(departureDate    : DateTime,
+case class Segment(departureDate    : OffsetDateTime,
                    fromAirport      : String,
                    toAirport        : String,
                    airline          : String,
@@ -25,11 +28,13 @@ case class Segment(departureDate    : DateTime,
 
 case class Flight(segments: Seq[Segment])
 
-case class Fare(flights: Seq[Flight], price: BigDecimal, date: DateTime) {
+case class Fare(flights : Seq[Flight],
+                price   : BigDecimal,
+                date    : OffsetDateTime) {
 
   def prettyPrint: String = {
     val route = flights.map(_.segments.head.fromAirport).mkString("-")
-    val dates = flights.map(_.segments.head.departureDate.toString("dd MMM")).mkString(", ")
+    val dates = flights.map(f => DateTimeFormatter.ofPattern("dd MMM").format(f.segments.head.departureDate)).mkString(", ")
 
     val sb = new StringBuilder
     sb.appendLine(s"$route \t $dates \t Price: USD ${price.toInt}")
