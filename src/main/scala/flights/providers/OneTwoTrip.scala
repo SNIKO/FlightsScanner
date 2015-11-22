@@ -41,7 +41,7 @@ class OneTwoTrip extends FaresProvider{
           Flight(offsetDateTime, trip.from, trip.to, trip.airline, trip.flightNumber, trip.operatedBy, plane, t.reservationClass, t.cabinClass)
         })
 
-        Itenerary(trips)
+        Itinerary(trips)
       })
 
       val price = f.priceInfo.adultFare + f.priceInfo.adultTaxes + f.priceInfo.markup
@@ -52,7 +52,7 @@ class OneTwoTrip extends FaresProvider{
           price * rate.factor
       }
 
-      Fare(directions, usdPrice, OffsetDateTime.now())
+      Fare(directions, usdPrice, "USD", OffsetDateTime.now())
     })
 
     fares

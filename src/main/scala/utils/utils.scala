@@ -2,11 +2,15 @@ package utils
 
 import java.io.PrintWriter
 import java.time._
-import java.time.format.DateTimeFormatter
+import java.time.format.{DateTimeFormatter, DateTimeParseException}
 import java.util.{Timer, TimerTask}
+
+import argonaut.Argonaut._
+import argonaut._
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.{Future, Promise}
+import scalaz.-\/
 
 object Utils {
 
@@ -69,5 +73,43 @@ object Implicits {
 
   implicit class RichStringBuilder(stringBuilder: StringBuilder) {
     def appendLine(s: String): StringBuilder = stringBuilder.append(s).append("\n")
+  }
+
+  implicit class RichACursor(cursor: ACursor) {
+    def asLocalDateTime(formatter: DateTimeFormatter): DecodeResult[LocalDateTime] = {
+      try {
+        cursor.as[String].map(d => LocalDateTime.parse(d, formatter))
+      } catch {
+        case e: DateTimeParseException => DecodeResult.fail(e.getMessage, cursor.history)
+      }
+    }
+
+    def read[T](implicit e: DecodeJson[T]): DecodeResult[T] =
+      cursor.as[T] match {
+        case DecodeResult(-\/(err)) =>
+          val failureFocus = if (cursor.failed) cursor.failureFocus else cursor.focus
+          DecodeResult.fail(s"Failed to decode json: $failureFocus. ${err._1}", err._2)
+        case res => res
+      }
+
+    def readArrayOf[T](implicit e: DecodeJson[T]): DecodeResult[Vector[T]] =
+      cursor.succeeded match {
+        case true => cursor.focus match {
+          case None => DecodeResult.ok(Vector.empty[T])
+          case Some(j) if j.isNull => DecodeResult.ok(Vector.empty[T])
+          case Some(j) => j.acursor.as[Vector[T]]
+        }
+        case false => DecodeResult.fail(s"Failed to decode json: ${cursor.failureFocus}. Expected element not found:", cursor.history)
+      }
+
+    def tryRead[T](implicit e: DecodeJson[T]): DecodeResult[Option[T]] =
+      cursor.succeeded match {
+        case true => cursor.focus match {
+          case None => DecodeResult.ok(None)
+          case Some(j) if j.isNull => DecodeResult.ok(None)
+          case Some(j) => j.acursor.read[T].map(Some(_))
+        }
+        case false => DecodeResult.fail(s"Failed to decode json: ${cursor.failureFocus}. Expected element not found:", cursor.history)
+      }
   }
 }
