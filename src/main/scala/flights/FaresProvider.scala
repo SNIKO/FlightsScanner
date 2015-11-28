@@ -3,6 +3,7 @@ package flights
 import java.time.format.DateTimeFormatter
 import java.time.{LocalDate, OffsetDateTime}
 
+import flights.providers.{OneTwoTrip, Momondo}
 import utils.Implicits._
 
 import scala.concurrent.Future
@@ -11,19 +12,24 @@ trait FaresProvider {
   def search(directions: Seq[FlightDirection]): Future[Either[FaresProviderError, Seq[Fare]]]
 }
 
+object FaresProvider {
+  val Momondo = new Momondo()
+  val OneTwoTrip = new OneTwoTrip()
+}
+
 case class FaresProviderError(msg: String)
 
 case class FlightDirection(fromAirport: String, toAirport: String, date: LocalDate) {
   override def toString = fromAirport + "->" + toAirport + " " + DateTimeFormatter.ofPattern("dd MMM").format(date)
 }
 
-case class Fare(itineraries: Seq[Itinerary], price: BigDecimal, currency: String, date: OffsetDateTime) {
+case class Fare(itineraries: Seq[Itinerary], date: OffsetDateTime, prices: Seq[PriceInfo]) {
   def prettyPrint: String = {
     val route = itineraries.map(_.flights.head.fromAirport).mkString("-")
     val dates = itineraries.map(f => DateTimeFormatter.ofPattern("dd MMM").format(f.flights.head.departureDate)).mkString(", ")
 
     val sb = new StringBuilder
-    sb.appendLine(s"$route \t $dates \t Price: $currency ${price.toInt}")
+    sb.appendLine(s"$route \t $dates \t Price: ${prices.sortBy(_.price).mkString(", ")}")
 
     itineraries.zipWithIndex foreach { case (flight, index) =>
       sb.appendLine(s"\tFlight $index")
@@ -62,6 +68,10 @@ case class Flight(departureDate    : OffsetDateTime,
   }
 
   override def hashCode = departureDate.hashCode + airline.hashCode + flightNumber.hashCode
+}
+
+case class PriceInfo(price: BigDecimal, currency: String, provider: String) {
+  override def toString = s"$currency ${price.toInt} ($provider)"
 }
 
 object TicketClass {

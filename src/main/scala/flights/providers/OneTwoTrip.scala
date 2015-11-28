@@ -52,7 +52,7 @@ class OneTwoTrip extends FaresProvider{
           price * rate.factor
       }
 
-      Fare(directions, usdPrice, "USD", OffsetDateTime.now())
+      Fare(directions, OffsetDateTime.now(), Seq(PriceInfo(usdPrice, "USD", "OneTwoTrip")))
     })
 
     fares

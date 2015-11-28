@@ -35,6 +35,7 @@ case class SearchResult(airlines: Seq[Airline],
                         resultNumber: Int,
                         searchId: String,
                         segments: Seq[Segment],
+                        suppliers: Seq[Supplier],
                         ticketClasses: Seq[TicketClass])
 
 case class Airline(iataCode: String, icaoCode: Option[String], name: String)
@@ -81,5 +82,9 @@ case class Offer(adultPrice: Float,
                  totalPriceExclTax: Float)
 
 case class Segment(duration: Int, key: String, legIndexes: Seq[Int])
+
+case class Supplier(displayName: String,
+                    offerIndexes: Seq[Int],
+                    supplierId: String)
 
 case class TicketClass(code: String, name: String)

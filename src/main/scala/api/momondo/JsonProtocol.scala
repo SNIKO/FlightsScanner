@@ -53,8 +53,9 @@ object JsonProtocol {
        resultNumber <- (j --\ "ResultNumber").read[Int]
            searchId <- (j --\ "SearchId").read[String]
            segments <- (j --\ "Segments").readArrayOf[Segment]
+          suppliers <- (j --\ "Suppliers").readArrayOf[Supplier]
       ticketClasses <- (j --\ "TicketClasses").readArrayOf[TicketClass]
-    } yield SearchResult(airlines, airports, done, engineId, error, errorMessage, fees, flights, legs, offers, resultNumber, searchId, segments, ticketClasses))
+    } yield SearchResult(airlines, airports, done, engineId, error, errorMessage, fees, flights, legs, offers, resultNumber, searchId, segments, suppliers, ticketClasses))
 
   implicit def AirlineDecoder: DecodeJson[Airline] =
     DecodeJson(j => for {
@@ -128,6 +129,13 @@ object JsonProtocol {
              key <- (jSegment --\ "Key").read[String]
       legIndexes <- (jSegment --\ "LegIndexes").readArrayOf[Int]
     } yield Segment(duration, key, legIndexes))
+
+  implicit def SupplierDecoder: DecodeJson[Supplier] =
+    DecodeJson(jSupplier => for {
+       displayName <- (jSupplier --\ "DisplayName").read[String]
+      offerIndexes <- (jSupplier --\ "OfferIndexes").readArrayOf[Int]
+        supplierId <- (jSupplier --\ "SupplierId").read[String]
+    } yield Supplier(displayName, offerIndexes, supplierId))
 
   implicit def TicketClassDecoder: DecodeJson[TicketClass] =
     DecodeJson(jTicketClass => for {

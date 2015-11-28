@@ -15,6 +15,7 @@ case class References(airlines: Seq[Airline],
                       flights: Seq[Flight],
                       legs: Seq[Leg],
                       segments: Seq[Segment],
+                      offers: Seq[Offer],
                       ticketClasses: Seq[TicketClass]) {
 
   def update(searchResult: SearchResult): References = {
@@ -24,13 +25,14 @@ case class References(airlines: Seq[Airline],
       flights ++ searchResult.flights,
       legs ++ searchResult.legs,
       segments ++ searchResult.segments,
+      offers ++ searchResult.offers,
       ticketClasses ++ searchResult.ticketClasses)
   }
 }
 
 object References {
   def empty: References = {
-    References(Seq.empty[Airline], Seq.empty[Airport], Seq.empty[Flight], Seq.empty[Leg], Seq.empty[Segment], Seq.empty[TicketClass])
+    References(Seq.empty[Airline], Seq.empty[Airport], Seq.empty[Flight], Seq.empty[Leg], Seq.empty[Segment], Seq.empty[Offer], Seq.empty[TicketClass])
   }
 }
 
@@ -57,7 +59,7 @@ class Momondo extends FaresProvider {
       allFares <- maybeResult match {
         case Right(result) =>
           val updatedReferences = references.update(result)
-          val fares = parse(result.offers, updatedReferences)
+          val fares = parse(result.suppliers, updatedReferences)
 
           if (result.done)
             Future.successful(Right(fares))
@@ -75,24 +77,27 @@ class Momondo extends FaresProvider {
   }
 
   // TODO: error handling
-  def parse(offers: Seq[Offer], references: References): Seq[Fare] = {
-    val fares = offers.map(offer => {
-      val itineraries = references.flights(offer.flightIndex).segmentIndexes.map(i => references.segments(i)).map(segment => {
-        val legs = segment.legIndexes.map(l => references.legs(l)).map(leg => {
-          val airline = references.airlines(leg.airlineIndex)
-          val origin = references.airports(leg.originIndex)
-          val destination = references.airports(leg.destinationIndex)
-          val departureDate = leg.departure.atOffset(timeZoneOffsets(origin.iataCode))
-          val ticketClass = references.ticketClasses(offer.ticketClassIndex)
+  def parse(suppliers: Seq[Supplier], references: References): Seq[Fare] = {
+    val fares = for {
+      supplier <- suppliers
+      offer <- supplier.offerIndexes.map(index => references.offers(index))
+    } yield {
+        val itineraries = references.flights(offer.flightIndex).segmentIndexes.map(i => references.segments(i)).map(segment => {
+          val legs = segment.legIndexes.map(l => references.legs(l)).map(leg => {
+            val airline = references.airlines(leg.airlineIndex)
+            val origin = references.airports(leg.originIndex)
+            val destination = references.airports(leg.destinationIndex)
+            val departureDate = leg.departure.atOffset(timeZoneOffsets(origin.iataCode))
+            val ticketClass = references.ticketClasses(offer.ticketClassIndex)
 
-          flights.Flight(departureDate, origin.iataCode, destination.iataCode, airline.iataCode, leg.flightNumber.toString, None, "", getTicketClass(ticketClass.code), "")
+            flights.Flight(departureDate, origin.iataCode, destination.iataCode, airline.iataCode, leg.flightNumber.toString, None, "", getTicketClass(ticketClass.code), ticketClass.name)
+          })
+
+          Itinerary(legs)
         })
 
-        Itinerary(legs)
-      })
-
-      Fare(itineraries, BigDecimal(offer.totalPrice), offer.currency, OffsetDateTime.now)
-    })
+        Fare(itineraries, OffsetDateTime.now, Seq(flights.PriceInfo(BigDecimal(offer.totalPrice), offer.currency, s"momondo\\${supplier.displayName}")))
+      }
 
     fares
   }
