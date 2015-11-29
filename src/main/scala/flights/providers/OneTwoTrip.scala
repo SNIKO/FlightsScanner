@@ -15,7 +15,7 @@ class OneTwoTrip extends FaresProvider{
   def search(directions: Seq[FlightDirection]): Future[Either[FaresProviderError, Seq[Fare]]] = {
     val flightsToSearch = directions.map(d => api.OneTwoTrip.Flight(d.fromAirport, d.toAirport, d.date))
 
-    api.OneTwoTrip.Api.search(flightsToSearch).map {
+    api.OneTwoTrip.Client.search(flightsToSearch).map {
       case Success(response) =>
         parse(response) match {
           case Success(fares) => Right(fares)

@@ -14,7 +14,7 @@ import scala.util.{Try, Failure, Success}
 
 class LimitReachedException extends Exception
 
-object Api {
+object Client {
 
   // TODO: Rewrite it using Spray
   def search(trip: Seq[Flight]): Future[Try[SearchResponse]] = Future {

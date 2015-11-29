@@ -2,7 +2,7 @@ package api.momondo
 
 import java.time.{LocalDateTime, LocalDate}
 
-case class FlightSearchRequest(adultCount: Int,
+case class SearchRequest(adultCount: Int,
                                application: String = "mobileapp",
                                childAges: Seq[Int] = Seq.empty[Int],
                                consumer: String = "cfmetaandroid",
@@ -14,7 +14,7 @@ case class FlightSearchRequest(adultCount: Int,
 
 case class Direction(departure: LocalDate, origin: String, destination: String)
 
-case class FlightSearchResponse(adultCount: Int,
+case class SearchSessionInfo(adultCount: Int,
                                 childAges: Seq[Int] = Seq.empty[Int],
                                 childCount: Int,
                                 culture: String,

@@ -37,15 +37,16 @@ object References {
 }
 
 class Momondo extends FaresProvider {
+
   override def search(directions: Seq[FlightDirection]): Future[Either[FaresProviderError, Seq[Fare]]] = {
-    val searchRequest = api.momondo.FlightSearchRequest(
+    val searchRequest = api.momondo.SearchRequest(
       adultCount = 1,
       culture = "en-US",
       ticketClass = "ECO",
       segments = directions.map(d => Direction(d.date, d.fromAirport, d.toAirport)))
 
     for {
-      maybeSession <- api.momondo.Api.flightSearch(searchRequest)
+      maybeSession <- api.momondo.Client.startSearch(searchRequest)
       fares <- maybeSession match {
         case Right(session) => pollResults(session.searchId, session.engineId)
         case Left(error) => Future.successful(Left(FaresProviderError(error)))
@@ -53,20 +54,20 @@ class Momondo extends FaresProvider {
     } yield fares
   }
 
-  def pollResults(searchId: String, engineId: Int, attempts: Int = 3, references: References = References.empty): Future[Either[FaresProviderError, Seq[Fare]]] = {
+  def pollResults(searchId: String, engineId: Int, attempts: Int = 3, references: References = References.empty): Future[Either[FaresProviderError, Seq[Fare]]] =
     for {
-      maybeResult <- api.momondo.Api.pollSearchResult(searchId, engineId)
+      maybeResult <- api.momondo.Client.pollSearchResult(searchId, engineId)
       allFares <- maybeResult match {
         case Right(result) =>
           val updatedReferences = references.update(result)
           val fares = parse(result.suppliers, updatedReferences)
 
-          if (result.done)
-            Future.successful(Right(fares))
-          else for {
-            restFares <- pollResults(searchId, engineId, 3, updatedReferences)
-          } yield restFares.right.map(rest => fares ++ rest)
-
+          result.done match {
+            case true => Future.successful(Right(fares))
+            case false => for {
+              maybeRestFares <- pollResults(searchId, engineId, 3, updatedReferences)
+            } yield maybeRestFares.right.map(restFares => fares ++ restFares)
+          }
         case Left(error) =>
           attempts match {
             case left if left > 0 => pollResults(searchId, engineId, left - 1, references)
@@ -74,7 +75,6 @@ class Momondo extends FaresProvider {
           }
       }
     } yield allFares
-  }
 
   // TODO: error handling
   def parse(suppliers: Seq[Supplier], references: References): Seq[Fare] = {

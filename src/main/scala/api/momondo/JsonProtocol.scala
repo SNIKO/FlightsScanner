@@ -9,8 +9,8 @@ object JsonProtocol {
 
   import utils.Implicits._
 
-  implicit def FlightSearchRequestEncoder: EncodeJson[FlightSearchRequest] =
-    EncodeJson((r: FlightSearchRequest) => Json(
+  implicit def FlightSearchRequestEncoder: EncodeJson[SearchRequest] =
+    EncodeJson((r: SearchRequest) => Json(
        "AdultCount" := r.adultCount,
       "Application" := r.application,
         "ChildAges" := jArray(Nil),
@@ -27,7 +27,7 @@ object JsonProtocol {
       "Destination" := s.destination
     ))
 
-  implicit def FlightSearchResponseDecoder: DecodeJson[FlightSearchResponse] =
+  implicit def FlightSearchResponseDecoder: DecodeJson[SearchSessionInfo] =
     DecodeJson(j => for {
        adultCount <- (j --\ "AdultCount").read[Int]
         childAges <- (j --\ "ChildAges").readArrayOf[Int]
@@ -36,7 +36,7 @@ object JsonProtocol {
          engineId <- (j --\ "EngineId").read[Int]
       infantCount <- (j --\ "InfantCount").read[Int]
          searchId <- (j --\ "SearchId").read[String]
-    } yield FlightSearchResponse(adultCount, childAges, childCount, culture, engineId, infantCount, searchId))
+    } yield SearchSessionInfo(adultCount, childAges, childCount, culture, engineId, infantCount, searchId))
 
   implicit def SearchResultDecoder: DecodeJson[SearchResult] =
     DecodeJson(j => for {
