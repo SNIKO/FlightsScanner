@@ -2,34 +2,33 @@ package flights.providers
 
 import java.time.{LocalDateTime, OffsetDateTime}
 
-import api.OneTwoTrip.SearchResponse
+import api.OneTwoTrip.JsonProtocol._
 import flights._
 
-import scala.concurrent.Future
-import scala.util.{Success, Failure, Try}
-
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
+import scala.util.{Failure, Success, Try}
 
 class OneTwoTrip extends FaresProvider{
 
-  def search(directions: Seq[FlightDirection]): Future[Either[FaresProviderError, Seq[Fare]]] = {
+  def search(directions: Seq[FlightDirection]): Future[Either[FaresProviderError, Seq[flights.Fare]]] = {
     val flightsToSearch = directions.map(d => api.OneTwoTrip.Flight(d.fromAirport, d.toAirport, d.date))
 
     api.OneTwoTrip.Client.search(flightsToSearch).map {
-      case Success(response) =>
+      case Right(response) =>
         parse(response) match {
           case Success(fares) => Right(fares)
           case Failure(ex) =>
             // TODO: Log
             Left(FaresProviderError(ex.getMessage))
         }
-      case Failure(ex) =>
+      case Left(error) =>
         // TODO: Log
-        Left(FaresProviderError(ex.getMessage))
+        Left(FaresProviderError(error.toString))
     }
   }
 
-  def parse(response: SearchResponse): Try[Seq[Fare]] = Try {
+  def parse(response: SearchResponse): Try[Seq[flights.Fare]] = Try {
     val fares = response.fares.map(f => {
       val directions = f.directions.map(d => {
         val trips = d.trips.map(t => {
@@ -49,10 +48,10 @@ class OneTwoTrip extends FaresProvider{
         case "USD" => price
         case currency =>
           val rate = response.rates.find(r => r.currencyFrom == currency && r.currencyTo == "USD").head
-          price * rate.factor
+          price * rate.factor.toDouble
       }
 
-      Fare(directions, OffsetDateTime.now(), Seq(PriceInfo(usdPrice, "USD", "OneTwoTrip")))
+      flights.Fare(directions, OffsetDateTime.now(), Seq(flights.PriceInfo(usdPrice, "USD", "OneTwoTrip")))
     })
 
     fares

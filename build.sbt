@@ -6,8 +6,6 @@ scalaVersion := "2.11.6"
 
 libraryDependencies += "com.typesafe" % "config" % "1.3.0"
 
-libraryDependencies += "io.spray" %% "spray-json" % "1.3.2"
-
 libraryDependencies += "io.argonaut" %% "argonaut" % "6.0.4"
 
 libraryDependencies += "com.typesafe.akka" %% "akka-http-experimental" % "2.0-M1"

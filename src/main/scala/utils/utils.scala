@@ -80,7 +80,23 @@ object Implicits {
       try {
         cursor.as[String].map(d => LocalDateTime.parse(d, formatter))
       } catch {
-        case e: DateTimeParseException => DecodeResult.fail(e.getMessage, cursor.history)
+        case e: DateTimeParseException => DecodeResult.fail(s"Failed to decode json: ${cursor.focus}. ${e.getMessage}", cursor.history)
+      }
+    }
+
+    def readLocalDate(formatter: DateTimeFormatter): DecodeResult[LocalDate] = {
+      try {
+        cursor.read[String].map(d => LocalDate.parse(d, formatter))
+      } catch {
+        case e: DateTimeParseException => DecodeResult.fail(s"Failed to decode json: ${cursor.focus}. ${e.getMessage}", cursor.history)
+      }
+    }
+
+    def readLocalTime(formatter: DateTimeFormatter): DecodeResult[LocalTime] = {
+      try {
+        cursor.read[String].map(d => LocalTime.parse(d, formatter))
+      } catch {
+        case e: DateTimeParseException => DecodeResult.fail(s"Failed to decode json: ${cursor.focus}. ${e.getMessage}", cursor.history)
       }
     }
 
@@ -109,7 +125,7 @@ object Implicits {
           case Some(j) if j.isNull => DecodeResult.ok(None)
           case Some(j) => j.acursor.read[T].map(Some(_))
         }
-        case false => DecodeResult.fail(s"Failed to decode json: ${cursor.failureFocus}. Expected element not found:", cursor.history)
+        case false => DecodeResult.ok(None)
       }
   }
 }

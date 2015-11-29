@@ -3,99 +3,134 @@ package api.OneTwoTrip
 import java.time._
 import java.time.format.DateTimeFormatter
 
-import spray.json._
+import argonaut.Argonaut._
+import argonaut._
 
-import scala.util.Try
+import utils.Implicits._
 
-object JsonProtocol extends DefaultJsonProtocol {
+object JsonProtocol {
+  /**
+   * SearchResponse
+   */
+  case class SearchResponse(fares: Seq[Fare], trips: Seq[Trip], planes: Seq[Plane],rates: Seq[Rate])
 
-  def parse(searchResponse: String): Try[SearchResponse] = Try {
-    val json      = searchResponse.parseJson
-
-    val jPlanes   = fromField[JsObject]       (json, "planes")
-    val jRates    = fromField[JsObject]       (json, "rates")
-    val jTrips    = fromField[Vector[JsValue]](json, "trps")
-    val jFares    = fromField[Vector[JsValue]](json, "frs")
-
-    val fares = jFares.map(readFare)
-    val trips = jTrips.map(readTrip)
-    val planes = readPlanes(jPlanes)
-    val rates = readRates(jRates)
-
-    SearchResponse(fares, trips, planes, rates)
+  object SearchResponse {
+    implicit def Decoder: DecodeJson[SearchResponse] =
+      DecodeJson(root => for {
+        planes <- (root --\ "planes").read[PlanesList]
+        rates <- (root --\ "rates").read[RatesList]
+        trips <- (root --\ "trps").readArrayOf[Trip]
+        fares <- (root --\ "frs").readArrayOf[Fare]
+      } yield SearchResponse(fares, trips, planes.planes, rates.rates))
   }
 
-  private def readPlanes(planes: JsObject): Seq[Plane] = {
-    val p = planes.fields map {
-      case (code, JsString(name)) => Plane(code, name)
-    }
+  /**
+   * Planes
+   */
+  case class Plane(code: String, name: String)
+  case class PlanesList(planes: Seq[Plane])
 
-    p.toSeq
+  object PlanesList {
+    implicit def Decoder: DecodeJson[PlanesList] =
+      DecodeJson(jPlanes => for {
+        pairs <- jPlanes.as[Map[String, String]]
+        planes = pairs.map { case (code, name) => Plane(code, name) }
+      } yield PlanesList(planes.toSeq))
   }
 
-  private def readRates(rates: JsObject): Seq[Rate] = {
-    val r = rates.fields map {
-      case (currencyPair, JsString(rate)) => currencyPair.splitAt(3) match {
-        case (from, to) => Rate(from, to, rate.toDouble)
-      }
-    }
+  /**
+   * Rates
+   */
+  case class Rate(currencyFrom: String, currencyTo: String, factor: String)
+  case class RatesList(rates: Seq[Rate])
 
-    r.toSeq
+  object RatesList {
+    implicit def Decoder: DecodeJson[RatesList] =
+      DecodeJson(jRates => for {
+        pairs <- jRates.as[Map[String, String]]
+        rates = pairs.map {
+          case (currencyPair, rate) => currencyPair.splitAt(3) match {
+            case (from, to) => Rate(from, to, rate)
+          }
+        }
+      } yield RatesList(rates.toSeq))
   }
 
-  private def readTrip(trip: JsValue): Trip = {
-    val stDt    = fromField[String]         (trip, "stDt")
-    val stTm    = fromField[String]         (trip, "stTm")
-    val from    = fromField[String]         (trip, "from")
-    val to      = fromField[String]         (trip, "to")
-    val airCmp  = fromField[String]         (trip, "airCmp")
-    val fltNm   = fromField[String]         (trip, "fltNm")
-    val oprdBy  = fromField[Option[String]] (trip, "oprdBy")
-    val plane   = fromField[String]         (trip, "plane")
+  /**
+   * Trip
+   */
+  case class Trip(date: LocalDate, time: LocalTime, from: String, to: String, airline: String, flightNumber: String, operatedBy: Option[String], plane: String)
 
+  object Trip {
     val dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
     val timeFormatter = DateTimeFormatter.ofPattern("HHmm")
 
-    val date = LocalDate.parse(stDt, dateFormatter)
-    val time = LocalTime.parse(stTm, timeFormatter)
-
-    Trip(date, time, from, to, airCmp, fltNm, oprdBy, plane)
+    implicit def Decoder: DecodeJson[Trip] =
+      DecodeJson(jTrip => for {
+          stDt <- (jTrip --\ "stDt").readLocalDate(dateFormatter)
+          stTm <- (jTrip --\ "stTm").readLocalTime(timeFormatter)
+          from <- (jTrip --\ "from").read[String]
+            to <- (jTrip --\ "to").read[String]
+        airCmp <- (jTrip --\ "airCmp").read[String]
+         fltNm <- (jTrip --\ "fltNm").read[String]
+        oprdBy <- (jTrip --\ "oprdBy").tryRead[String]
+         plane <- (jTrip --\ "plane").read[String]
+      } yield Trip(stDt, stTm, from, to, airCmp, fltNm, oprdBy, plane))
   }
 
-  private def readFare(fare: JsValue): Fare = {
-    val id      = fromField[Int](fare, "id")
-    val prcInf  = fromField[JsValue](fare, "prcInf")
-    val dirs    = fromField[Vector[JsValue]](fare, "dirs")
+  /**
+   * Fare
+   */
+  case class Fare(id: Int, directions: Seq[Direction], priceInfo: PriceInfo)
 
-    val directions = dirs.map(dir => readDirection(dir))
-    val priceInfo = readPriceInfo(prcInf)
-
-    Fare(id, directions, priceInfo)
+  object Fare {
+    implicit def Decoder: DecodeJson[Fare] =
+      DecodeJson(jFare => for {
+            id <- (jFare --\ "id").read[Int]
+        prcInf <- (jFare --\ "prcInf").read[PriceInfo]
+          dirs <- (jFare --\ "dirs").readArrayOf[Direction]
+      } yield Fare(id, dirs, prcInf))
   }
 
-  private def readDirection(direction: JsValue): Direction = {
-    val id = fromField[Int](direction, "id")
-    val trps = fromField[Vector[JsValue]](direction, "trps")
+  /**
+   * Direction
+   */
+  case class Direction(id: Int, trips: Seq[TripRef])
 
-    val trips = trps.map(trip => readTripRef(trip))
-
-    Direction(id, trips)
+  object Direction {
+    implicit def Decoder: DecodeJson[Direction] =
+      DecodeJson(jDirection => for {
+          id <- (jDirection --\ "id").read[Int]
+        trps <- (jDirection --\ "trps").readArrayOf[TripRef]
+      } yield Direction(id, trps))
   }
 
-  private def readTripRef(trip: JsValue): TripRef = {
-    val id      = fromField[Int]    (trip, "id")
-    val cls     = fromField[String] (trip, "cls")
-    val srvCls  = fromField[String] (trip, "srvCls")
+  /**
+   * TripRef
+   */
+  case class TripRef(id: Int, reservationClass: String, cabinClass: String)
 
-    TripRef(id, cls, srvCls)
+  object TripRef {
+    implicit def Decoder: DecodeJson[TripRef] =
+      DecodeJson(jTripRef => for {
+            id <- (jTripRef --\ "id").read[Int]
+           cls <- (jTripRef --\ "cls").read[String]
+        srvCls <- (jTripRef --\ "srvCls").read[String]
+      } yield TripRef(id, cls, srvCls))
   }
 
-  private def readPriceInfo(value: JsValue): PriceInfo = {
-    val adtB      = fromField[BigDecimal](value, "adtB")
-    val adtT      = fromField[BigDecimal](value, "adtT")
-    val markupNew = fromField[BigDecimal](value, "markupNew")
-    val cur       = fromField[String]    (value, "cur")
+  /**
+   * PriceInfo
+   */
+  case class PriceInfo(adultFare: BigDecimal, adultTaxes: BigDecimal, currency: String, markup: BigDecimal)
 
-    PriceInfo(adtB, adtT, cur, markupNew)
+  object PriceInfo {
+    implicit def Decoder: DecodeJson[PriceInfo] =
+      DecodeJson(jPriceInfo => for {
+        adtB      <- (jPriceInfo --\ "adtB").read[Float]
+        adtT      <- (jPriceInfo --\ "adtT").read[Float]
+        markupNew <- (jPriceInfo --\ "markupNew").read[Float]
+        cur       <- (jPriceInfo --\ "cur").read[String]
+      } yield PriceInfo(adtB.toDouble, adtT.toDouble, cur, markupNew.toDouble))
   }
 }
