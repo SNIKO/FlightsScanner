@@ -12,7 +12,7 @@ import scala.util.{Failure, Success, Try}
 class OneTwoTrip extends FaresProvider{
 
   def search(directions: Seq[FlightDirection]): Future[Either[FaresProviderError, Seq[flights.Fare]]] = {
-    val flightsToSearch = directions.map(d => api.OneTwoTrip.Flight(d.fromAirport, d.toAirport, d.date))
+    val flightsToSearch = directions.map(d => api.OneTwoTrip.Client.Flight(d.fromAirport, d.toAirport, d.date))
 
     api.OneTwoTrip.Client.search(flightsToSearch).map {
       case Right(response) =>

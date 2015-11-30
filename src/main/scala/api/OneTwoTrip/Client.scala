@@ -1,52 +1,49 @@
 package api.OneTwoTrip
 
-import java.io.IOException
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import java.time.{LocalDate, OffsetDateTime}
+
+import akka.actor.ActorSystem
+import akka.http.scaladsl.Http
+import akka.http.scaladsl.model.HttpMethods._
+import akka.http.scaladsl.model._
+import akka.http.scaladsl.unmarshalling.Unmarshal
+import akka.stream.ActorMaterializer
 
 import api.OneTwoTrip.JsonProtocol._
 import argonaut.Argonaut._
-import config.AppConfig
-import utils.Utils
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
-import scala.io.Source
+import scalaz.{-\/, \/-}
 
-trait SearchError
-class RequestLimitReachedError extends SearchError
-case class ResponseParseError(msg: String) extends SearchError
-case class ServiceError(msg: String) extends SearchError
-
-case class Flight(fromAirport: String, toAirport: String, date: LocalDate) {
-  override def toString = fromAirport + "->" + toAirport + " " + DateTimeFormatter.ofPattern("dd MMM").format(date)
-}
+trait ServiceError
+class RequestLimitReachedError extends ServiceError
+case class ProtocolError(msg: String) extends ServiceError
 
 object Client {
 
-  // TODO: Rewrite it using Spray
-  def search(trip: Seq[Flight]): Future[Either[SearchError, SearchResponse]] = Future {
-    try {
-      val searchUrl = getSearchUrl(trip)
-      val content = Source.fromURL(searchUrl).mkString
+  implicit val sys = ActorSystem()
+  implicit val mat = ActorMaterializer()
 
-      content match {
-        case Errors.requestLimitReached => Left(new RequestLimitReachedError())
-        case faresAsJson => faresAsJson.decodeEither[SearchResponse].toEither match {
-          case Right(fares) =>
-            val filePath = AppConfig.baseFolder + getFileName(trip) + ".json"
-            Utils.saveToFile(filePath, content)
-            Right(fares)
-          case Left(error) =>
-            val filePath = AppConfig.baseFolder + "Errors\\" + getFileName(trip) + ".txt"
-            val msg = searchUrl + "\n\n" + error
+  case class Flight(fromAirport: String, toAirport: String, date: LocalDate) {
+    override def toString = fromAirport + "->" + toAirport + " " + DateTimeFormatter.ofPattern("dd MMM").format(date)
+  }
 
-            Utils.saveToFile(filePath, msg)
-            Left(ResponseParseError(error))
-        }
+  type Trip = Seq[Flight]
+
+  def search(trip: Trip): Future[Either[ServiceError, SearchResponse]] = {
+    val response = for {
+      response <- Http().singleRequest(HttpRequest(GET, getSearchUrl(trip)))
+      responseEntity <- Unmarshal(response.entity).to[String]
+    } yield responseEntity
+
+    response.map {
+      case Errors.requestLimitReached => Left(new RequestLimitReachedError())
+      case faresAsJson => faresAsJson.decodeEither[SearchResponse] match {
+        case \/-(fares) => Right(fares)
+        case -\/(error) => Left(new ProtocolError(error))
       }
-    } catch {
-      case e: IOException => Left(ServiceError(e.getMessage))
     }
   }
 
@@ -54,15 +51,8 @@ object Client {
     val requestLimitReached = "{\"error\":\"REQUEST_LIMIT_REACHED\"}"
   }
 
-  private def getSearchUrl(route: Seq[Flight]): String = {
-    val r = route.map(flight => s"${DateTimeFormatter.ofPattern("ddMM").format(flight.date)}" + flight.fromAirport + flight.toAirport).mkString
+  private def getSearchUrl(trip: Trip): String = {
+    val r = trip.map(flight => s"${DateTimeFormatter.ofPattern("ddMM").format(flight.date)}" + flight.fromAirport + flight.toAirport).mkString
     s"https://secure.onetwotrip.com/_api/searching/startSync/?route=$r&ad=1&cs=E"
-  }
-
-  private def getFileName(flights: Seq[Flight]): String = {
-    val route = flights.map(f => DateTimeFormatter.ofPattern("ddMM").format(f.date) + f.fromAirport + f.toAirport).mkString
-    val timestamp = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmssZ").format(OffsetDateTime.now)
-
-    timestamp + " " + route
   }
 }
