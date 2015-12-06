@@ -3,12 +3,13 @@ package flights.providers
 import java.time.OffsetDateTime
 
 import api.momondo._
-
-import flights.{FaresProvider, FlightDirection, FaresProviderError, Fare, Itinerary}
-
-import scala.concurrent.Future
+import flights.{Fare, FaresProvider, FaresProviderError, FlightDirection, Itinerary}
+import utils.Implicits._
+import utils.Utils._
 
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
+import scalaz.EitherT
 
 case class References(airlines: Seq[Airline],
                       airports: Seq[Airport],
@@ -38,46 +39,37 @@ object References {
 
 class Momondo extends FaresProvider {
 
-  override def search(directions: Seq[FlightDirection]): Future[Either[FaresProviderError, Seq[Fare]]] = {
+  override def search(directions: Seq[FlightDirection]): FutureActionResult[FaresProviderError, Seq[Fare]] = {
     val searchRequest = api.momondo.SearchRequest(
       adultCount = 1,
       culture = "en-US",
       ticketClass = "ECO",
       segments = directions.map(d => Direction(d.date, d.fromAirport, d.toAirport)))
 
-    for {
-      maybeSession <- api.momondo.Client.startSearch(searchRequest)
-      fares <- maybeSession match {
-        case Right(session) => pollResults(session.searchId, session.engineId)
-        case Left(error) => Future.successful(Left(FaresProviderError(error)))
-      }
+    val res = for {
+      session <- EitherT(api.momondo.Client.startSearch(searchRequest))
+      fares   <- EitherT(pollResults(session.searchId, session.engineId))
     } yield fares
+
+    res.leftMap(error => FaresProviderError("Momondo", s"Failed to load fares for route '$directions'. $error")).run
   }
 
-  def pollResults(searchId: String, engineId: Int, attempts: Int = 3, references: References = References.empty): Future[Either[FaresProviderError, Seq[Fare]]] =
-    for {
-      maybeResult <- api.momondo.Client.pollSearchResult(searchId, engineId)
-      allFares <- maybeResult match {
-        case Right(result) =>
-          val updatedReferences = references.update(result)
-          val fares = parse(result.suppliers, updatedReferences)
+  def pollResults(searchId: String, engineId: Int, isDone: Boolean = false, references: References = References.empty): FutureActionResult[String, Seq[Fare]] =
+    if (isDone)
+      Future.successful(ActionSuccess(Seq.empty[Fare]))
+    else {
+      val allFares = for {
+        pollResult        <- EitherT(api.momondo.Client.pollSearchResult(searchId, engineId))
+        updatedReferences =  references.update(pollResult)
+        fares             <- EitherT(Future(parse(pollResult.suppliers, updatedReferences)))
+        restFares         <- EitherT(pollResults(pollResult.searchId, pollResult.engineId, pollResult.done, updatedReferences))
+      } yield fares ++ restFares
 
-          result.done match {
-            case true => Future.successful(Right(fares))
-            case false => for {
-              maybeRestFares <- pollResults(searchId, engineId, 3, updatedReferences)
-            } yield maybeRestFares.right.map(restFares => fares ++ restFares)
-          }
-        case Left(error) =>
-          attempts match {
-            case left if left > 0 => pollResults(searchId, engineId, left - 1, references)
-            case 0 => Future.successful(Left(FaresProviderError(error)))
-          }
-      }
-    } yield allFares
+      allFares.run
+    }
 
   // TODO: error handling
-  def parse(suppliers: Seq[Supplier], references: References): Seq[Fare] = {
+  def parse(suppliers: Seq[Supplier], references: References): ActionResult[String, Seq[flights.Fare]] = try {
     val fares = for {
       supplier <- suppliers
       offer <- supplier.offerIndexes.map(index => references.offers(index))
@@ -99,7 +91,9 @@ class Momondo extends FaresProvider {
         Fare(itineraries, OffsetDateTime.now, Seq(flights.PriceInfo(BigDecimal(offer.totalPrice), offer.currency, s"momondo\\${supplier.displayName}")))
       }
 
-    fares
+   ActionSuccess(fares)
+  } catch {
+    case e: Throwable => ActionFailure(e.toString)
   }
 
   def getTicketClass(ticketClass: String) = ticketClass match {

@@ -10,7 +10,7 @@ import argonaut._
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.{Future, Promise}
-import scalaz.-\/
+import scalaz._
 
 object Utils {
 
@@ -20,6 +20,11 @@ object Utils {
     writer.close()
     filePath
   }
+
+  type ActionResult[TError, TResult] = TError \/ TResult
+  type FutureActionResult[TError, TResult] = Future[ActionResult[TError, TResult]]
+  val ActionSuccess = \/-
+  val ActionFailure = -\/
 }
 
 object After {
@@ -127,5 +132,10 @@ object Implicits {
         }
         case false => DecodeResult.ok(None)
       }
+  }
+
+  implicit val FutureMonad = new Monad[Future] {
+    def point[A](a : => A): Future[A] = Future(a)
+    def bind[A, B](fa: Future[A])(f: (A) => Future[B]): Future[B] = fa flatMap f
   }
 }

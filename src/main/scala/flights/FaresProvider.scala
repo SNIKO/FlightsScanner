@@ -3,13 +3,12 @@ package flights
 import java.time.format.DateTimeFormatter
 import java.time.{LocalDate, OffsetDateTime}
 
-import flights.providers.{OneTwoTrip, Momondo}
+import flights.providers.{Momondo, OneTwoTrip}
 import utils.Implicits._
-
-import scala.concurrent.Future
+import utils.Utils.FutureActionResult
 
 trait FaresProvider {
-  def search(directions: Seq[FlightDirection]): Future[Either[FaresProviderError, Seq[Fare]]]
+  def search(directions: Seq[FlightDirection]): FutureActionResult[FaresProviderError, Seq[Fare]]
 }
 
 object FaresProvider {
@@ -17,7 +16,7 @@ object FaresProvider {
   val OneTwoTrip = new OneTwoTrip()
 }
 
-case class FaresProviderError(msg: String)
+case class FaresProviderError(provider: String, msg: String)
 
 case class FlightDirection(fromAirport: String, toAirport: String, date: LocalDate) {
   override def toString = fromAirport + "->" + toAirport + " " + DateTimeFormatter.ofPattern("dd MMM").format(date)

@@ -11,6 +11,8 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.util.Success
 
+import utils.Utils.{ActionFailure, ActionSuccess}
+
 class FaresScanner {
   val MaxConcurrentLoads = 3
   val CheckInterval = Duration.ofHours(24)
@@ -60,10 +62,10 @@ class FaresScanner {
     Log(s"Loading fares for route: '$route'...")
 
     FaresProvider.OneTwoTrip.search(route) flatMap {
-      case Right(fares) =>
+      case ActionSuccess(fares) =>
         Log(s"${fares.length} fares for $route have been loaded")
         Future(fares)
-      case Left(ex) =>
+      case ActionFailure(ex) =>
         logError(route, ex.msg)
         After(Duration.ofMinutes(1))(loadFares(route))
     }

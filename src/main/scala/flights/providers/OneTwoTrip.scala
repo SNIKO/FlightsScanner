@@ -4,31 +4,28 @@ import java.time.{LocalDateTime, OffsetDateTime}
 
 import api.OneTwoTrip.JsonProtocol._
 import flights._
+import utils.Implicits._
+import utils.Utils.{ActionFailure, ActionResult, ActionSuccess, FutureActionResult}
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
-import scala.util.{Failure, Success, Try}
+import scalaz.EitherT
 
 class OneTwoTrip extends FaresProvider{
 
-  def search(directions: Seq[FlightDirection]): Future[Either[FaresProviderError, Seq[flights.Fare]]] = {
+  def search(directions: Seq[FlightDirection]): FutureActionResult[FaresProviderError, Seq[flights.Fare]] = {
     val flightsToSearch = directions.map(d => api.OneTwoTrip.Client.Flight(d.fromAirport, d.toAirport, d.date))
 
-    api.OneTwoTrip.Client.search(flightsToSearch).map {
-      case Right(response) =>
-        parse(response) match {
-          case Success(fares) => Right(fares)
-          case Failure(ex) =>
-            // TODO: Log
-            Left(FaresProviderError(ex.getMessage))
-        }
-      case Left(error) =>
-        // TODO: Log
-        Left(FaresProviderError(error.toString))
-    }
+    val res = for {
+      response <- EitherT(api.OneTwoTrip.Client.search(flightsToSearch))
+      fares <- EitherT(Future(parse(response)))
+    } yield fares
+
+    res.leftMap(error => FaresProviderError("OneTwoTrip", s"Failed to load fares for route '$directions'. $error")).run
   }
 
-  def parse(response: SearchResponse): Try[Seq[flights.Fare]] = Try {
+  // TODO error handling
+  def parse(response: SearchResponse): ActionResult[String, Seq[flights.Fare]] = try {
     val fares = response.fares.map(f => {
       val directions = f.directions.map(d => {
         val trips = d.trips.map(t => {
@@ -54,7 +51,9 @@ class OneTwoTrip extends FaresProvider{
       flights.Fare(directions, OffsetDateTime.now(), Seq(flights.PriceInfo(usdPrice, "USD", "OneTwoTrip")))
     })
 
-    fares
+    ActionSuccess(fares)
+  } catch {
+    case e: Throwable => ActionFailure(e.toString)
   }
 
   val timeZoneOffsets = flights.ReferenceData.airports.map(a => (a.iataCode, a.zoneOffset)).toMap

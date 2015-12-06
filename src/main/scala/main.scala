@@ -1,10 +1,12 @@
 import java.time._
 
 import flights.{FaresProvider, FlightDirection}
+import utils.Implicits._
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.util.{Failure, Success}
+import scalaz.EitherT
 
 object main extends App {
 
@@ -17,7 +19,7 @@ object main extends App {
   var response = providers.map(p => p.search(route)).foldLeft(Future(Seq.empty[flights.Fare])) {
     (resultFuture, providerFuture) => for {
       resultFares <- resultFuture
-      providerFares <- providerFuture.map(_.right.getOrElse(Seq.empty[flights.Fare])) recover { case res => Seq.empty[flights.Fare] }
+      providerFares <- EitherT(providerFuture).leftMap { case err => println(err) } . getOrElse(Seq.empty[flights.Fare])
     } yield resultFares ++ providerFares
   }
 

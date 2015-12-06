@@ -9,17 +9,15 @@ import akka.http.scaladsl.model.HttpMethods._
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.stream.ActorMaterializer
-
 import api.OneTwoTrip.JsonProtocol._
 import argonaut.Argonaut._
+import utils.Utils.{ActionFailure, FutureActionResult}
 
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
-import scalaz.{-\/, \/-}
 
-trait ServiceError
-class RequestLimitReachedError extends ServiceError
-case class ProtocolError(msg: String) extends ServiceError
+sealed trait ServiceError
+final class RequestLimitReachedError extends ServiceError
+final case class APIError(msg: String) extends ServiceError
 
 object Client {
 
@@ -32,18 +30,16 @@ object Client {
 
   type Trip = Seq[Flight]
 
-  def search(trip: Trip): Future[Either[ServiceError, SearchResponse]] = {
+  def search(trip: Trip): FutureActionResult[ServiceError, SearchResponse] = {
+    val url = getSearchUrl(trip)
     val response = for {
-      response <- Http().singleRequest(HttpRequest(GET, getSearchUrl(trip)))
+      response <- Http().singleRequest(HttpRequest(GET, url))
       responseEntity <- Unmarshal(response.entity).to[String]
     } yield responseEntity
 
     response.map {
-      case Errors.requestLimitReached => Left(new RequestLimitReachedError())
-      case faresAsJson => faresAsJson.decodeEither[SearchResponse] match {
-        case \/-(fares) => Right(fares)
-        case -\/(error) => Left(new ProtocolError(error))
-      }
+      case Errors.requestLimitReached => ActionFailure(new RequestLimitReachedError())
+      case json => json.decodeEither[SearchResponse].leftMap(error => new APIError(s"Failed to parse response for search request '$url'. $error"))
     }
   }
 
