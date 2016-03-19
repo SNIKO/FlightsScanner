@@ -1,3 +1,6 @@
+
+assemblyJarName in assembly := "scanner.jar"
+
 name := "FlightsScanner"
 
 version := "1.0"
