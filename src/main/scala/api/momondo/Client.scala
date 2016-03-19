@@ -21,17 +21,22 @@ object Client {
 
   def startSearch(request: SearchRequest): FutureActionResult[String, SearchSessionInfo] = {
     val requestEntity = HttpEntity(ContentTypes.`application/json`, request.asJson.toString())
+    val req = HttpRequest(POST, "http://api.momondo.com/api/3.0/FlightSearch", customHeaders, requestEntity)
 
     for {
-      response <- Http().singleRequest(HttpRequest(POST, "http://api.momondo.com/api/3.0/FlightSearch", customHeaders, requestEntity))
+      response <- Http().singleRequest(req)
       responseEntity <- Unmarshal(response.entity).to[String]
       result = responseEntity.decodeEither[SearchSessionInfo]
     } yield result
   }
 
-  def pollSearchResult(searchId: String, engineId: Int): FutureActionResult[String, SearchResult] = for {
-    response <- Http().singleRequest(HttpRequest(GET, s"http://api.momondo.com/api/3.0/FlightSearch/$searchId/$engineId/true", customHeaders))
-    entity <- Unmarshal(response.entity).to[String]
-    result = entity.decodeEither[SearchResult]
-  } yield result
+  def pollSearchResult(searchId: String, engineId: Int): FutureActionResult[String, SearchResult] = {
+    val request = HttpRequest(GET, s"http://api.momondo.com/api/3.0/FlightSearch/$searchId/$engineId/true", customHeaders)
+
+    for {
+      response <- Http().singleRequest(request)
+      entity <- Unmarshal(response.entity).to[String]
+      result = entity.decodeEither[SearchResult]
+    } yield result
+  }
 }
