@@ -118,7 +118,8 @@ object Implicits {
         case true => cursor.focus match {
           case None => DecodeResult.ok(Vector.empty[T])
           case Some(j) if j.isNull => DecodeResult.ok(Vector.empty[T])
-          case Some(j) => j.acursor.as[Vector[T]]
+          case Some(j) if j.isArray => j.acursor.as[Vector[T]]
+          case Some(j) => j.acursor.as[T].map(r => Vector(r))
         }
         case false => DecodeResult.fail(s"Failed to decode json: ${cursor.failureFocus}. Expected element not found:", cursor.history)
       }
