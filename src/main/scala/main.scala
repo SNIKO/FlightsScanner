@@ -52,9 +52,7 @@ object main extends App {
   faresInTargetCurrency.onComplete {
     case Success(fares) =>
       val groupedFares = fares.groupBy(f => f.itineraries).map(g => flights.Fare(g._1, g._2.head.date, g._2.flatMap(_.prices))).toSeq
-      println(s"${groupedFares.length} options found: ")
-
-      groupedFares.sortBy(_.prices.map(_.price).min).foreach(f => println(f.prettyPrint))
+      println(Report.generate(groupedFares))
     case Failure(ex) => println(ex)
   }
 
