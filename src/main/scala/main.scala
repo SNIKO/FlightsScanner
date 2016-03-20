@@ -1,34 +1,51 @@
 import java.time._
+import java.time.format.DateTimeFormatter
 
 import api.yahoo.Finance._
 import api.yahoo.Model._
-import flights.{FaresProvider, FlightDirection}
+import config.AppConfig
+import flights._
 import utils.Implicits._
+import utils.Utils
 
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
 import scala.util.{Failure, Success}
 import scalaz.EitherT
 
 object main extends App {
 
-  var route = Seq(
-    FlightDirection("SYD", "KBP", LocalDate.of(2016, 12, 17)),
-    FlightDirection("KBP", "SYD", LocalDate.of(2017, 1, 15)))
-
-  val providers = Seq(FaresProvider.Momondo, FaresProvider.OneTwoTrip)
-
-  val faresFuture = providers.map(p => p.search(route)).foldLeft(Future(Seq.empty[flights.Fare])) {
-    (resultFuture, providerFuture) => for {
-      resultFares <- resultFuture
-      providerFares <- EitherT(providerFuture).leftMap { case err => println(err) }.getOrElse(Seq.empty[flights.Fare])
-    } yield resultFares ++ providerFares
-  }
-
+  val cities = flights.ReferenceData.airports.map(a => (a.iataCode, a.city)).toMap
   val targetCurrency = "USD"
 
-  val faresInTargetCurrency = for {
-    fares <- faresFuture
+  def saveTripFares(allFares: Seq[Fare]) = {
+    val faresByDirection = allFares.groupBy(f => {
+      val origin = cities(f.itineraries.head.flights.head.fromAirport)
+      val destination = cities(f.itineraries.head.flights.last.toAirport)
+
+      (origin, destination)
+    })
+
+    faresByDirection.foreach {
+      case ((origin, destination), flights) =>
+        val tripDate = flights.head.itineraries.head.flights.head.departureDate
+        val filePath = s"${AppConfig.baseFolder}formatted\\$origin - $destination ${DateTimeFormatter.ofPattern("ddMM").format(tripDate)}.txt"
+
+        Utils.saveToFile(filePath, Report.generate(flights))
+    }
+  }
+
+  var trips = for {
+    config      <- AppConfig.tripConfigs
+    origin      <- config.fromAirports
+    destination <- config.toAirports
+    date        <- config.minDate to config.maxDate withStep Period.ofDays(1)
+    duration    <- config.minDuration to config.maxDuration
+    flight        = new FlightDirection(origin, destination, date)
+    returnFlight  = new FlightDirection(destination, origin, date.plusDays(duration))
+  } yield Trip(Seq(flight, returnFlight))
+
+  val scanFuture = for {
+    fares <- Scanner.search(trips)
     exchangeRates <- {
       val pairs = fares
         .flatMap(f => f.prices.map(p => p.currency))
@@ -49,10 +66,10 @@ object main extends App {
     })
   } yield faresWithTargetCurrency
 
-  faresInTargetCurrency.onComplete {
+  scanFuture.onComplete {
     case Success(fares) =>
-      val groupedFares = fares.groupBy(f => f.itineraries).map(g => flights.Fare(g._1, g._2.head.date, g._2.flatMap(_.prices))).toSeq
-      println(Report.generate(groupedFares))
+      saveTripFares(fares)
+      println("Completed")
     case Failure(ex) => println(ex)
   }
 

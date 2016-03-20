@@ -8,7 +8,7 @@ import utils.Implicits._
 import utils.Utils.FutureActionResult
 
 trait FaresProvider {
-  def search(directions: Seq[FlightDirection]): FutureActionResult[FaresProviderError, Seq[Fare]]
+  def search(trip: Trip): FutureActionResult[FaresProviderError, Seq[Fare]]
 }
 
 object FaresProvider {
@@ -17,6 +17,10 @@ object FaresProvider {
 }
 
 case class FaresProviderError(provider: String, msg: String)
+
+case class Trip(flights: Seq[FlightDirection]) {
+  override def toString = flights.mkString(", ")
+}
 
 case class FlightDirection(fromAirport: String, toAirport: String, date: LocalDate) {
   override def toString = fromAirport + "->" + toAirport + " " + DateTimeFormatter.ofPattern("dd MMM").format(date)

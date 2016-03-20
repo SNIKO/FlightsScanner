@@ -13,15 +13,15 @@ import scalaz.EitherT
 
 class OneTwoTrip extends FaresProvider{
 
-  def search(directions: Seq[FlightDirection]): FutureActionResult[FaresProviderError, Seq[flights.Fare]] = {
-    val flightsToSearch = directions.map(d => api.OneTwoTrip.Client.Flight(d.fromAirport, d.toAirport, d.date))
+  def search(trip: flights.Trip): FutureActionResult[FaresProviderError, Seq[flights.Fare]] = {
+    val flightsToSearch = trip.flights.map(d => api.OneTwoTrip.Client.Flight(d.fromAirport, d.toAirport, d.date))
 
     val res = for {
       response <- EitherT(api.OneTwoTrip.Client.search(flightsToSearch))
       fares <- EitherT(Future(parse(response)))
     } yield fares
 
-    res.leftMap(error => FaresProviderError("OneTwoTrip", s"Failed to load fares for route '$directions'. $error")).run
+    res.leftMap(error => FaresProviderError("OneTwoTrip", s"Failed to load fares for route '$trip'. $error")).run
   }
 
   // TODO error handling
