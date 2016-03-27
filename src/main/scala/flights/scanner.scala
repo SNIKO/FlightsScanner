@@ -1,5 +1,9 @@
 package flights
 
+import java.time.LocalTime
+
+import utils.Utils._
+
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.util.Success
@@ -22,7 +26,15 @@ object Scanner {
     println(s"Searching flights for route '$trip'...")
 
     val providersResults = providers.map(p => {
-      EitherT(p.search(trip)).run.map(s => s | Seq.empty[Fare]) recover { case err => Seq.empty[Fare] }
+      EitherT(p.search(trip)).run.map {
+        case ActionFailure(err) =>
+          println(s"${LocalTime.now()} Failed to load rates from a provider: $err")
+          Seq.empty[Fare]
+        case ActionSuccess(fares) => fares
+      } recover { case err =>
+        println(s"${LocalTime.now()} Failed to load rates from a provider: $err")
+        Seq.empty[Fare]
+      }
     })
 
     Future.sequence(providersResults)

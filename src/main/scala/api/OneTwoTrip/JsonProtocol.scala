@@ -59,7 +59,7 @@ object JsonProtocol {
   /**
    * Trip
    */
-  case class Trip(date: LocalDate, time: LocalTime, from: String, to: String, airline: String, flightNumber: String, operatedBy: Option[String], plane: String)
+  case class Trip(date: LocalDate, time: LocalTime, from: String, to: String, airline: String, flightNumber: String, duration: Duration, operatedBy: Option[String], plane: String)
 
   object Trip {
     val dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
@@ -69,13 +69,14 @@ object JsonProtocol {
       DecodeJson(jTrip => for {
           stDt <- (jTrip --\ "stDt").readLocalDate(dateFormatter)
           stTm <- (jTrip --\ "stTm").readLocalTime(timeFormatter)
+         fltTm <- (jTrip --\ "fltTm").readDuration()
           from <- (jTrip --\ "from").read[String]
             to <- (jTrip --\ "to").read[String]
         airCmp <- (jTrip --\ "airCmp").read[String]
          fltNm <- (jTrip --\ "fltNm").read[String]
         oprdBy <- (jTrip --\ "oprdBy").tryRead[String]
          plane <- (jTrip --\ "plane").read[String]
-      } yield Trip(stDt, stTm, from, to, airCmp, fltNm, oprdBy, plane))
+      } yield Trip(stDt, stTm, from, to, airCmp, fltNm, fltTm, oprdBy, plane))
   }
 
   /**

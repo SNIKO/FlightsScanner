@@ -1,7 +1,7 @@
 package flights
 
 import java.time.format.DateTimeFormatter
-import java.time.{LocalDate, OffsetDateTime}
+import java.time.{LocalDate, OffsetDateTime, Duration}
 
 import flights.providers.{Momondo, OneTwoTrip}
 import utils.Implicits._
@@ -34,13 +34,20 @@ case class Fare(itineraries: Seq[Itinerary], date: OffsetDateTime, prices: Seq[P
     val sb = new StringBuilder
     sb.appendLine(s"$route \t $dates \t Price: ${prices.sortBy(_.price).mkString(", ")}")
 
-    itineraries.zipWithIndex foreach { case (flight, index) =>
+    itineraries.zipWithIndex foreach { case (itinerary, index) =>
       sb.appendLine(s"\tFlight $index")
-      flight.flights foreach { case segment =>
-        val city    = Fare.cities.getOrElse(segment.toAirport, segment.toAirport)
-        val airline = Fare.airlines.getOrElse(segment.airline, "Unknown")
+      itinerary.flights.zipWithIndex foreach { case (flight, flightIndex) =>
+        val city    = Fare.cities.getOrElse(flight.toAirport, flight.toAirport)
+        val airline = Fare.airlines.getOrElse(flight.airline, "Unknown")
 
-        sb.appendLine(f"\t\t${segment.airline} ${segment.flightNumber}%4s $city%10s ${segment.departureDate} $airline")
+        if (flightIndex < itinerary.flights.length - 1) {
+          val nextFlight = itinerary.flights(flightIndex + 1)
+          val stopover = Duration.between(flight.arrivalDate, nextFlight.departureDate)
+
+          sb.appendLine(f"\t\t${flight.airline} ${flight.flightNumber}%4s $city%10s ${flight.departureDate} $airline, stopover ${stopover.toHours} hours")
+        }
+        else
+          sb.appendLine(f"\t\t${flight.airline} ${flight.flightNumber}%4s $city%10s ${flight.departureDate} $airline")
       }
     }
 
@@ -56,6 +63,7 @@ object Fare {
 case class Itinerary(flights: Seq[Flight])
 
 case class Flight(departureDate    : OffsetDateTime,
+                  arrivalDate      : OffsetDateTime,
                   fromAirport      : String,
                   toAirport        : String,
                   airline          : String,

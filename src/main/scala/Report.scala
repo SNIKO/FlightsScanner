@@ -1,3 +1,6 @@
+import java.time.format.DateTimeFormatter
+import java.time.{DayOfWeek, Duration, LocalTime}
+
 import flights.Fare
 import utils.Implicits._
 
@@ -7,11 +10,58 @@ object Report {
     val sb = new StringBuilder
     sb.appendLine(s"${fares.length} options found")
     sb.appendLine("")
+    sb.appendLine(faresByStopovers(fares, Duration.ofHours(8)))
+    sb.appendLine("")
     sb.appendLine(faresByCity(fares))
     sb.appendLine("")
     sb.appendLine(faresByAirline(fares))
     sb.appendLine("")
     sb.appendLine(faresFlatList(fares))
+
+    sb.mkString
+  }
+
+  case class StopoverInfo(city: String, dayOfWeek: DayOfWeek, arrivalDate: LocalTime, departureDate: LocalTime, duration: Duration)
+
+  def faresByStopovers(fares: Seq[Fare], minStopoverDuration: Duration): String = {
+    val stopovers = for {
+      fare      <- fares
+      itinerary <- fare.itineraries
+      stopover   <- itinerary.flights
+        .dropRight(1)
+        .zipWithIndex
+        .map { case (flight, i) =>
+          val city = getCityAirportName(flight.toAirport)
+          val nextFlight = itinerary.flights(i + 1)
+          val duration = Duration.between(flight.arrivalDate, nextFlight.departureDate)
+
+          StopoverInfo(city, flight.arrivalDate.getDayOfWeek, flight.arrivalDate.toLocalTime, nextFlight.departureDate.toLocalTime, duration)
+        }
+        .filter(stopOver => stopOver.duration.compareTo(minStopoverDuration) > 0)
+    } yield (stopover, fare.prices)
+
+    val groupedStopovers = stopovers
+      .groupBy { case (stopover, _) => stopover }
+      .map { case (stopover, groupValues) =>
+        val prices = groupValues.flatMap { case (_, priceInfo) => priceInfo.map(p => p) }
+        val minPrice = prices.filter(_.currency == "USD").minBy(_.price)
+
+        (stopover, minPrice)
+      }
+      .toSeq
+      .sortBy(_._2.price)
+
+    val sb = new StringBuilder
+    sb.appendLine(s"STOPOVERS")
+    sb.appendLine("")
+    groupedStopovers.foreach {
+      case (stopover, price) =>
+        val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+        val arrivalTime = stopover.arrivalDate.format(timeFormatter)
+        val departureTime = stopover.departureDate.format(timeFormatter)
+
+        sb.appendLine(f"${stopover.city}%25s | ${stopover.dayOfWeek}%10s | $arrivalTime | $departureTime | ${stopover.duration.toHours}%2s hours | $price")
+    }
 
     sb.mkString
   }

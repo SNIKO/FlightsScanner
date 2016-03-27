@@ -31,10 +31,10 @@ class OneTwoTrip extends FaresProvider{
         val trips = d.trips.map(t => {
           val trip = response.trips(t.id)
           val plane = response.planes.find(p => p.code == trip.plane).map(_.name).getOrElse(trip.plane)
-          val localDateTime = LocalDateTime.of(trip.date, trip.time)
-          val offsetDateTime = OffsetDateTime.of(localDateTime, timeZoneOffsets(trip.from))
+          val departureTime = OffsetDateTime.of(LocalDateTime.of(trip.date, trip.time), timeZoneOffsets(trip.from))
+          val arrivalTime = departureTime.plus(trip.duration).withOffsetSameInstant(timeZoneOffsets(trip.to))
 
-          Flight(offsetDateTime, trip.from, trip.to, trip.airline, trip.flightNumber, trip.operatedBy, plane, t.reservationClass, t.cabinClass)
+          Flight(departureTime, arrivalTime, trip.from, trip.to, trip.airline, trip.flightNumber, trip.operatedBy, plane, t.reservationClass, t.cabinClass)
         })
 
         Itinerary(trips)

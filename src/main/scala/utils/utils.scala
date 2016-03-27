@@ -105,6 +105,16 @@ object Implicits {
       }
     }
 
+    def readDuration(): DecodeResult[Duration] = {
+      try {
+        cursor.read[String].map(d => d.splitAt(2) match {
+          case (hh, mm) => Duration.ofSeconds(hh.toInt * 3600 + mm.toInt * 60)
+        })
+      } catch {
+        case e => DecodeResult.fail(s"Failed to decode json: ${cursor.focus}. ${e.getMessage}", cursor.history)
+      }
+    }
+
     def read[T](implicit e: DecodeJson[T]): DecodeResult[T] =
       cursor.as[T] match {
         case DecodeResult(-\/(err)) =>

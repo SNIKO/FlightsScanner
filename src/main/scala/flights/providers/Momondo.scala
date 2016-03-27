@@ -80,9 +80,10 @@ class Momondo extends FaresProvider {
             val origin = references.airports(leg.originIndex)
             val destination = references.airports(leg.destinationIndex)
             val departureDate = leg.departure.atOffset(timeZoneOffsets(origin.iataCode))
+            val arrivalDate = leg.arrival.atOffset(timeZoneOffsets(destination.iataCode))
             val ticketClass = references.ticketClasses(offer.ticketClassIndex)
 
-            flights.Flight(departureDate, origin.iataCode, destination.iataCode, airline.iataCode, leg.flightNumber.toString, None, "", getTicketClass(ticketClass.code), ticketClass.name)
+            flights.Flight(departureDate, arrivalDate, origin.iataCode, destination.iataCode, airline.iataCode, leg.flightNumber.toString, None, "", getTicketClass(ticketClass.code), ticketClass.name)
           })
 
           Itinerary(legs)
